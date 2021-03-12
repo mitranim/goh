@@ -8,8 +8,6 @@ See API docs at https://pkg.go.dev/github.com/mitranim/goh.
 
 ## Usage
 
-Simple example, relying on default error handler:
-
 ```golang
 import "github.com/mitranim/goh"
 

@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 )
 
 /*
@@ -126,8 +127,6 @@ type Reader struct {
 	ErrFunc ErrFunc
 }
 
-var _ = http.Handler(Reader{})
-
 // Implement `http.Handler`.
 func (self Reader) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 	self.Head().Write(rew)
@@ -145,8 +144,8 @@ func (self Reader) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 func (self Reader) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
 
 /*
-HTTP handler that writes bytes. Note: for sending a string, use `String`, which
-should be marginally more efficient.
+HTTP handler that writes bytes. Note: for sending a string, use `String`,
+avoiding a bytes-to-string conversion.
 */
 type Bytes struct {
 	Status  int
@@ -154,8 +153,6 @@ type Bytes struct {
 	Body    []byte
 	ErrFunc ErrFunc
 }
-
-var _ = http.Handler(Bytes{})
 
 // Implement `http.Handler`.
 func (self Bytes) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
@@ -182,8 +179,8 @@ func BytesWith(status int, body []byte) Bytes {
 }
 
 /*
-HTTP handler that writes a string. Note: for sending bytes, use `Bytes`, which
-should be marginally more efficient.
+HTTP handler that writes a string. Note: for sending bytes, use `Bytes`,
+avoiding a string-to-bytes conversion.
 */
 type String struct {
 	Status  int
@@ -191,8 +188,6 @@ type String struct {
 	Body    string
 	ErrFunc ErrFunc
 }
-
-var _ = http.Handler(String{})
 
 // Implement `http.Handler`.
 func (self String) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
@@ -230,8 +225,6 @@ type Json struct {
 	ErrFunc ErrFunc
 }
 
-var _ = http.Handler(Json{})
-
 // Implement `http.Handler`.
 func (self Json) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 	rew.Header().Set("Content-Type", "application/json")
@@ -262,10 +255,13 @@ func JsonWith(status int, body interface{}) Json {
 HTTP handler that automatically sets the appropriate XML headers and encodes
 its body as XML. Currently does not support custom encoder options; if you
 need that feature, open an issue or PR.
+
+Caution: this does NOT prepend the processing instruction `<?xml?>`. When you
+don't need to specify the encoding, this instruction is entirely skippable.
+When you need to specify the encoding, wrap `.Body` in the utility type
+`XmlDoc` provided by this package.
 */
 type Xml Json
-
-var _ = http.Handler(Xml{})
 
 // Implement `http.Handler`.
 func (self Xml) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
@@ -303,8 +299,6 @@ type Redirect struct {
 	ErrFunc ErrFunc
 }
 
-var _ = http.Handler(Redirect{})
-
 // Implement `http.Handler`.
 func (self Redirect) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 	self.Head().Write(rew)
@@ -318,6 +312,48 @@ func (self Redirect) Head() Head { return Head{self.Status, self.Header, self.Er
 func RedirectWith(status int, link string) Redirect {
 	return Redirect{Status: status, Link: link}
 }
+
+/*
+Utility type for use together with `Xml`. When encoded as XML, this prepends the
+`<?xml?>` header with version 1.0 and the specified encoding, if any. Example
+usage:
+
+	myXmlDoc := SomeType{SomeField: someValue}
+
+	res := goh.XmlOk(goh.XmlDoc{
+		Encoding: "utf-8",
+		Val: myXmlDoc,
+	})
+
+Eventual output:
+
+	<?xml version="1.0" encoding="utf-8"?>
+	<SomeType ...>
+*/
+type XmlDoc struct {
+	Encoding string
+	Val      interface{}
+}
+
+func (self XmlDoc) MarshalXML(enc *xml.Encoder, _ xml.StartElement) error {
+	inst := xmlVersionInst
+	if self.Encoding != "" {
+		inst = append(inst, ` encoding=`...)
+		inst = strconv.AppendQuote(inst, self.Encoding)
+	}
+
+	err := enc.EncodeToken(xml.ProcInst{
+		Target: `xml`,
+		Inst:   inst,
+	})
+	if err != nil {
+		return err
+	}
+
+	return enc.Encode(self.Val)
+}
+
+var xmlVersionInst = []byte(`version="1.0"`)
 
 type spyingWriter struct {
 	io.Writer
