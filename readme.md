@@ -80,6 +80,16 @@ type ErrJson struct {
 }
 ```
 
+## Changelog
+
+### `v0.1.2`
+
+`Redirect` no longer writes the HTTP status before invoking `http.Redirect`.
+
+### `v0.1.1`
+
+Optional support for `<?xml?>`.
+
 ## License
 
 https://unlicense.org

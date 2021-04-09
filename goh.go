@@ -90,17 +90,19 @@ yourself, unless implementing a new type.
 This must be called exactly once, and only before writing the body.
 */
 func (self Head) Write(rew http.ResponseWriter) {
-	target := rew.Header()
+	self.writeHeaders(rew)
+	if self.Status > 0 {
+		rew.WriteHeader(self.Status)
+	}
+}
 
+func (self Head) writeHeaders(rew http.ResponseWriter) {
+	target := rew.Header()
 	for key, vals := range self.Header {
 		target.Del(key)
 		for _, val := range vals {
 			target.Add(key, val)
 		}
-	}
-
-	if self.Status > 0 {
-		rew.WriteHeader(self.Status)
 	}
 }
 
@@ -301,7 +303,7 @@ type Redirect struct {
 
 // Implement `http.Handler`.
 func (self Redirect) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
-	self.Head().Write(rew)
+	self.Head().writeHeaders(rew)
 	http.Redirect(rew, req, self.Link, self.Status)
 }
 
