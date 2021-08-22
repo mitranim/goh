@@ -11,13 +11,14 @@ See API docs at https://pkg.go.dev/github.com/mitranim/goh.
 ```golang
 import "github.com/mitranim/goh"
 
-// Simple example. Relies on default error handler.
+// Simple example. Implicitly uses default error handler.
 func handler(rew http.ResponseWriter, req *http.Request) {
   res := goh.StringOk("response text")
   res.ServeHTTP(rew, req)
 }
 
-// Simple example with status and headers. Relies on default error handler.
+// Simple example with status and headers.
+// Implicitly uses default error handler.
 func handler(rew http.ResponseWriter, req *http.Request) {
   res := goh.String{
     Status: http.StatusCreated,
@@ -27,7 +28,8 @@ func handler(rew http.ResponseWriter, req *http.Request) {
   res.ServeHTTP(rew, req)
 }
 
-// Simple JSON example. Relies on default error handler.
+// Simple JSON example.
+// Implicitly uses default error handler.
 func handler(rew http.ResponseWriter, req *http.Request) {
   res := goh.JsonOk(Val{10, 20})
   res.ServeHTTP(rew, req)
@@ -81,6 +83,10 @@ type ErrJson struct {
 ```
 
 ## Changelog
+
+### `v0.1.3`
+
+Added `Err`, `Handler`, `Respond`.
 
 ### `v0.1.2`
 
