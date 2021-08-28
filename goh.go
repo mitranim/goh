@@ -20,6 +20,12 @@ import (
 )
 
 /*
+Signature of a "request->response" function. All Goh handler types have a method
+`.Res` that conforms to this signature.
+*/
+type ResFunc = func(*http.Request) http.Handler
+
+/*
 Signature of an error handler function provided by user code to the various
 `http.Handler` types in this library, such as `String`.
 
@@ -154,6 +160,9 @@ func (self Reader) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 // Returns the pseudo-embedded `Head` part.
 func (self Reader) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
 
+// Conforms to `ResFunc`.
+func (self Reader) Res(*http.Request) http.Handler { return self }
+
 /*
 HTTP handler that writes bytes. Note: for sending a string, use `String`,
 avoiding a bytes-to-string conversion.
@@ -178,6 +187,9 @@ func (self Bytes) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 
 // Returns the pseudo-embedded `Head` part.
 func (self Bytes) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
+
+// Conforms to `ResFunc`.
+func (self Bytes) Res(*http.Request) http.Handler { return self }
 
 // Shortcut for `BytesWith(http.StatusOK, body)`.
 func BytesOk(body []byte) Bytes {
@@ -213,6 +225,9 @@ func (self String) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 
 // Returns the pseudo-embedded `Head` part.
 func (self String) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
+
+// Conforms to `ResFunc`.
+func (self String) Res(*http.Request) http.Handler { return self }
 
 // Shortcut for `StringWith(http.StatusOK, body)`.
 func StringOk(body string) String {
@@ -252,6 +267,9 @@ func (self Json) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 // Returns the pseudo-embedded `Head` part.
 func (self Json) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
 
+// Conforms to `ResFunc`.
+func (self Json) Res(*http.Request) http.Handler { return self }
+
 // Shortcut for `JsonWith(http.StatusOK, body)`.
 func JsonOk(body interface{}) Json {
 	return JsonWith(http.StatusOK, body)
@@ -290,6 +308,9 @@ func (self Xml) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 // Returns the pseudo-embedded `Head` part.
 func (self Xml) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
 
+// Conforms to `ResFunc`.
+func (self Xml) Res(*http.Request) http.Handler { return self }
+
 // Shortcut for `XmlWith(http.StatusOK, body)`.
 func XmlOk(body interface{}) Xml {
 	return XmlWith(http.StatusOK, body)
@@ -318,6 +339,9 @@ func (self Redirect) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 
 // Returns the pseudo-embedded `Head` part.
 func (self Redirect) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
+
+// Conforms to `ResFunc`.
+func (self Redirect) Res(*http.Request) http.Handler { return self }
 
 // Shortcut for `Redirect` with specific status and body.
 func RedirectWith(status int, link string) Redirect {

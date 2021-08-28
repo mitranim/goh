@@ -20,6 +20,15 @@ var (
 )
 
 var (
+	_ = ResFunc(Reader{}.Res)
+	_ = ResFunc(Bytes{}.Res)
+	_ = ResFunc(String{}.Res)
+	_ = ResFunc(Json{}.Res)
+	_ = ResFunc(Xml{}.Res)
+	_ = ResFunc(Redirect{}.Res)
+)
+
+var (
 	headSrc = http.Header{`one`: {`two`}, `three`: {`four`}}
 	headExp = http.Header{`One`: {`two`}, `Three`: {`four`}}
 )
