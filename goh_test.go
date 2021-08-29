@@ -122,7 +122,23 @@ func TestJson(t *testing.T) {
 	eq(`{"val":"hello world"}`, strings.TrimSpace(rew.Body.String()))
 }
 
-func TestJson_TryBytes(t *testing.T) {
+func TestJson_TryBytes_nil_head(t *testing.T) {
+	res := Json{
+		Status:  201,
+		Body:    JsonVal{`hello world`},
+		ErrFunc: ErrHandler,
+	}.TryBytes()
+
+	headExp := http.Header{}
+	headExp.Set(`content-type`, `application/json`)
+
+	eq(201, res.Status)
+	eq(headExp, res.Header)
+	eq(`{"val":"hello world"}`, string(res.Body))
+	eq(ptr(ErrHandler), ptr(res.ErrFunc))
+}
+
+func TestJson_TryBytes_non_nil_head(t *testing.T) {
 	res := Json{
 		Status:  201,
 		Header:  headSrc,
@@ -152,7 +168,23 @@ func TestXml(t *testing.T) {
 	eq(`<tag><val>hello world</val></tag>`, strings.TrimSpace(rew.Body.String()))
 }
 
-func TestXml_TryBytes(t *testing.T) {
+func TestXml_TryBytes_nil_head(t *testing.T) {
+	res := Xml{
+		Status:  201,
+		Body:    XmlVal{xml.Name{Local: `tag`}, `hello world`},
+		ErrFunc: ErrHandler,
+	}.TryBytes()
+
+	headExp := http.Header{}
+	headExp.Set(`content-type`, `application/xml`)
+
+	eq(201, res.Status)
+	eq(headExp, res.Header)
+	eq(`<tag><val>hello world</val></tag>`, string(res.Body))
+	eq(ptr(ErrHandler), ptr(res.ErrFunc))
+}
+
+func TestXml_TryBytes_non_nil_head(t *testing.T) {
 	res := Xml{
 		Status:  201,
 		Header:  headSrc,

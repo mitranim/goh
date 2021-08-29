@@ -285,7 +285,7 @@ func (self Json) TryBytes() Bytes {
 		panic(err)
 	}
 
-	head := self.Header.Clone()
+	head := cloneHead(self.Header)
 	head.Set("Content-Type", "application/json")
 
 	return Bytes{
@@ -352,7 +352,7 @@ func (self Xml) TryBytes() Bytes {
 		panic(err)
 	}
 
-	head := self.Header.Clone()
+	head := cloneHead(self.Header)
 	head.Set("Content-Type", "application/xml")
 
 	return Bytes{
@@ -491,4 +491,11 @@ func recHandler(ptr *http.Handler) {
 	}
 
 	*ptr = Err(err)
+}
+
+func cloneHead(val http.Header) http.Header {
+	if val == nil {
+		return http.Header{}
+	}
+	return val.Clone()
 }

@@ -84,6 +84,10 @@ type ErrJson struct {
 
 ## Changelog
 
+### `v0.1.6`
+
+`Json.TryBytes` and `Xml.TryBytes` no longer panic on nil header.
+
 ### `v0.1.5`
 
 Added `Json.TryBytes` and `Xml.TryBytes` for pre-encoding static responses.
