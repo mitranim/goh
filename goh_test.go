@@ -28,6 +28,15 @@ var (
 	_ = ResFunc(Redirect{}.Res)
 )
 
+type JsonVal struct {
+	Val string `json:"val"`
+}
+
+type XmlVal struct {
+	XMLName xml.Name
+	Val     string `xml:"val"`
+}
+
 var (
 	headSrc = http.Header{`one`: {`two`}, `three`: {`four`}}
 	headExp = http.Header{`One`: {`two`}, `Three`: {`four`}}
@@ -106,15 +115,28 @@ func TestJson(t *testing.T) {
 	headExp := headExp.Clone()
 	headExp.Set(`content-type`, `application/json`)
 
-	type T struct {
-		Val string `json:"val"`
-	}
-
-	Json{Status: 201, Header: headSrc, Body: T{`hello world`}}.ServeHTTP(rew, nil)
+	Json{Status: 201, Header: headSrc, Body: JsonVal{`hello world`}}.ServeHTTP(rew, nil)
 
 	eq(201, rew.Code)
 	eq(headExp, rew.Result().Header)
 	eq(`{"val":"hello world"}`, strings.TrimSpace(rew.Body.String()))
+}
+
+func TestJson_TryBytes(t *testing.T) {
+	res := Json{
+		Status:  201,
+		Header:  headSrc,
+		Body:    JsonVal{`hello world`},
+		ErrFunc: ErrHandler,
+	}.TryBytes()
+
+	headExp := headSrc.Clone()
+	headExp.Set(`content-type`, `application/json`)
+
+	eq(201, res.Status)
+	eq(headExp, res.Header)
+	eq(`{"val":"hello world"}`, string(res.Body))
+	eq(ptr(ErrHandler), ptr(res.ErrFunc))
 }
 
 func TestXml(t *testing.T) {
@@ -123,16 +145,28 @@ func TestXml(t *testing.T) {
 	headExp := headExp.Clone()
 	headExp.Set(`content-type`, `application/xml`)
 
-	type T struct {
-		XMLName xml.Name
-		Val     string `xml:"val"`
-	}
-
-	Xml{Status: 201, Header: headSrc, Body: T{xml.Name{Local: `tag`}, `hello world`}}.ServeHTTP(rew, nil)
+	Xml{Status: 201, Header: headSrc, Body: XmlVal{xml.Name{Local: `tag`}, `hello world`}}.ServeHTTP(rew, nil)
 
 	eq(201, rew.Code)
 	eq(headExp, rew.Result().Header)
 	eq(`<tag><val>hello world</val></tag>`, strings.TrimSpace(rew.Body.String()))
+}
+
+func TestXml_TryBytes(t *testing.T) {
+	res := Xml{
+		Status:  201,
+		Header:  headSrc,
+		Body:    XmlVal{xml.Name{Local: `tag`}, `hello world`},
+		ErrFunc: ErrHandler,
+	}.TryBytes()
+
+	headExp := headSrc.Clone()
+	headExp.Set(`content-type`, `application/xml`)
+
+	eq(201, res.Status)
+	eq(headExp, res.Header)
+	eq(`<tag><val>hello world</val></tag>`, string(res.Body))
+	eq(ptr(ErrHandler), ptr(res.ErrFunc))
 }
 
 func TestRedirect(t *testing.T) {
@@ -179,4 +213,8 @@ func try(err error) {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func ptr(val interface{}) uintptr {
+	return reflect.ValueOf(val).Pointer()
 }

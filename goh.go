@@ -270,6 +270,32 @@ func (self Json) Head() Head { return Head{self.Status, self.Header, self.ErrFun
 // Conforms to `ResFunc`.
 func (self Json) Res(*http.Request) http.Handler { return self }
 
+/*
+Converts to `Bytes` by encoding the body and adding the appropriate content type
+header. Panics on encoding errors. Should be used in root scope to pre-encode a
+static response:
+
+	import "github.com/mitranim/goh"
+
+	var someRes = goh.XmlOk(someValue).TryBytes()
+*/
+func (self Json) TryBytes() Bytes {
+	body, err := json.Marshal(self.Body)
+	if err != nil {
+		panic(err)
+	}
+
+	head := self.Header.Clone()
+	head.Set("Content-Type", "application/json")
+
+	return Bytes{
+		Status:  self.Status,
+		Header:  head,
+		Body:    body,
+		ErrFunc: self.ErrFunc,
+	}
+}
+
 // Shortcut for `JsonWith(http.StatusOK, body)`.
 func JsonOk(body interface{}) Json {
 	return JsonWith(http.StatusOK, body)
@@ -310,6 +336,32 @@ func (self Xml) Head() Head { return Head{self.Status, self.Header, self.ErrFunc
 
 // Conforms to `ResFunc`.
 func (self Xml) Res(*http.Request) http.Handler { return self }
+
+/*
+Converts to `Bytes` by encoding the body and adding the appropriate content type
+header. Panics on encoding errors. Should be used in root scope to pre-encode a
+static response:
+
+	import "github.com/mitranim/goh"
+
+	var someRes = goh.XmlOk(someValue).TryBytes()
+*/
+func (self Xml) TryBytes() Bytes {
+	body, err := xml.Marshal(self.Body)
+	if err != nil {
+		panic(err)
+	}
+
+	head := self.Header.Clone()
+	head.Set("Content-Type", "application/xml")
+
+	return Bytes{
+		Status:  self.Status,
+		Header:  head,
+		Body:    body,
+		ErrFunc: self.ErrFunc,
+	}
+}
 
 // Shortcut for `XmlWith(http.StatusOK, body)`.
 func XmlOk(body interface{}) Xml {

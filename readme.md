@@ -84,6 +84,14 @@ type ErrJson struct {
 
 ## Changelog
 
+### `v0.1.5`
+
+Added `Json.TryBytes` and `Xml.TryBytes` for pre-encoding static responses.
+
+### `v0.1.4`
+
+Added `.Res()` methods for request → response signatures.
+
 ### `v0.1.3`
 
 Added `Err`, `Handler`, `Respond`.
