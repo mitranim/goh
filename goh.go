@@ -121,14 +121,19 @@ func (self Head) writeHeaders(rew http.ResponseWriter) {
 	}
 }
 
+func (self Head) errFunc() ErrFunc {
+	fun := self.ErrFunc
+	if fun != nil {
+		return fun
+	}
+	return ErrHandlerDefault
+}
+
 func (self Head) handleErr(rew http.ResponseWriter, req *http.Request, wrote bool, err error) {
 	if err == nil {
 		return
 	}
-	if self.ErrFunc == nil {
-		self.ErrFunc = ErrHandlerDefault
-	}
-	self.ErrFunc(rew, req, wrote, err)
+	self.errFunc()(rew, req, wrote, err)
 }
 
 /*
@@ -277,23 +282,14 @@ static response:
 
 	import "github.com/mitranim/goh"
 
-	var someRes = goh.XmlOk(someValue).TryBytes()
+	var someRes = goh.JsonOk(someValue).TryBytes()
 */
 func (self Json) TryBytes() Bytes {
 	body, err := json.Marshal(self.Body)
 	if err != nil {
 		panic(err)
 	}
-
-	head := cloneHead(self.Header)
-	head.Set("Content-Type", "application/json")
-
-	return Bytes{
-		Status:  self.Status,
-		Header:  head,
-		Body:    body,
-		ErrFunc: self.ErrFunc,
-	}
+	return bytesFrom(self.Head(), `application/json`, body)
 }
 
 // Shortcut for `JsonWith(http.StatusOK, body)`.
@@ -351,16 +347,7 @@ func (self Xml) TryBytes() Bytes {
 	if err != nil {
 		panic(err)
 	}
-
-	head := cloneHead(self.Header)
-	head.Set("Content-Type", "application/xml")
-
-	return Bytes{
-		Status:  self.Status,
-		Header:  head,
-		Body:    body,
-		ErrFunc: self.ErrFunc,
-	}
+	return bytesFrom(self.Head(), `application/xml`, body)
 }
 
 // Shortcut for `XmlWith(http.StatusOK, body)`.
@@ -493,9 +480,21 @@ func recHandler(ptr *http.Handler) {
 	*ptr = Err(err)
 }
 
-func cloneHead(val http.Header) http.Header {
+func cloneHeader(val http.Header, size int) http.Header {
 	if val == nil {
-		return http.Header{}
+		return make(http.Header, size)
 	}
 	return val.Clone()
+}
+
+func bytesFrom(head Head, contentType string, body []byte) Bytes {
+	header := cloneHeader(head.Header, 1)
+	header.Set(`Content-Type`, contentType)
+
+	return Bytes{
+		Status:  head.Status,
+		Header:  header,
+		Body:    body,
+		ErrFunc: head.ErrFunc,
+	}
 }
