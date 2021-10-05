@@ -4,6 +4,8 @@
 
 Utility types that represent a not-yet-sent HTTP response as a value (status, header, body) with _no added abstractions or interfaces_. All types implement `http.Hander`.
 
+Recommended in conjunction with [`github.com/mitranim/rout`](https://github.com/mitranim/rout): router with support for returning responses as `http.Handler`.
+
 See API docs at https://pkg.go.dev/github.com/mitranim/goh.
 
 ## Usage
@@ -11,40 +13,48 @@ See API docs at https://pkg.go.dev/github.com/mitranim/goh.
 ```golang
 import "github.com/mitranim/goh"
 
-// Simple example. Implicitly uses default error handler.
-func handler(rew http.ResponseWriter, req *http.Request) {
-  res := goh.StringOk("response text")
-  res.ServeHTTP(rew, req)
+type Val struct {
+  One int64 `json:"one"`
+  Two int64 `json:"two"`
 }
 
-// Simple example with status and headers.
-// Implicitly uses default error handler.
-func handler(rew http.ResponseWriter, req *http.Request) {
-  res := goh.String{
+type ErrJson struct {
+  Error error `json:"error"`
+}
+
+// Simple string example.
+func handler(req *http.Request) http.Handler {
+  return goh.StringOk(`response text`)
+}
+
+// String example with status and headers.
+func handler(req *http.Request) http.Handler {
+  return goh.String{
     Status: http.StatusCreated,
-    Header: http.Header{"Content-Type": {"text/html"}},
-    Body:   "<body>response text</body>",
+    Header: http.Header{`Content-Type`: {`text/html`}},
+    Body:   `<body>response text</body>`,
   }
-  res.ServeHTTP(rew, req)
 }
 
 // Simple JSON example.
-// Implicitly uses default error handler.
-func handler(rew http.ResponseWriter, req *http.Request) {
-  res := goh.JsonOk(Val{10, 20})
-  res.ServeHTTP(rew, req)
+func handler(req *http.Request) http.Handler {
+  return goh.JsonOk(Val{10, 20})
 }
 
-// Example with custom error handler.
-func handler(rew http.ResponseWriter, req *http.Request) {
-  res := goh.Json{
+// JSON example with custom error handler.
+func handler(req *http.Request) http.Handler {
+  return goh.Json{
     Body: Val{10, 20},
     ErrFunc: writeErrAsJson,
   }
-  res.ServeHTTP(rew, req)
 }
 
-// Example with custom error handler.
+// You can customize the default error handler.
+func init() {
+  goh.ErrHandlerDefault = writeErrAsJson
+}
+
+// Example custom error handler.
 // Should be provided to response types as `ErrFunc: writeErrAsJson`.
 func writeErrAsJson(
   rew http.ResponseWriter, req *http.Request, wrote bool, err error,
@@ -65,20 +75,6 @@ func writeErrAsJson(
   if err != nil {
     fmt.Fprintf(os.Stderr, "%+v\n", err)
   }
-}
-
-// Can replace the default error handler globally. Don't abuse this power.
-func init() {
-  goh.ErrHandlerDefault = writeErrAsJson
-}
-
-type Val struct {
-  One int64 `json:"one"`
-  Two int64 `json:"two"`
-}
-
-type ErrJson struct {
-  Error error `json:"error"`
 }
 ```
 
