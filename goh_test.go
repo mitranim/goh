@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	ht "net/http/httptest"
+	"net/url"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -17,6 +19,9 @@ var (
 	_ = http.Handler(Json{})
 	_ = http.Handler(Xml{})
 	_ = http.Handler(Redirect{})
+	_ = http.Handler(File{})
+	_ = http.Handler(Dir{})
+	_ = http.Handler(NotFound{})
 )
 
 var (
@@ -26,6 +31,11 @@ var (
 	_ = ResFunc(Json{}.Res)
 	_ = ResFunc(Xml{}.Res)
 	_ = ResFunc(Redirect{}.Res)
+	_ = ResFunc(File{}.Res)
+	_ = ResFunc(File{}.MaybeRes)
+	_ = ResFunc(Dir{}.Res)
+	_ = ResFunc(Dir{}.MaybeRes)
+	_ = ResFunc(NotFound{}.Res)
 )
 
 type JsonVal struct {
@@ -46,34 +56,34 @@ func TestErr_empty(t *testing.T) {
 	rew := ht.NewRecorder()
 	Err(nil).ServeHTTP(rew, nil)
 
-	eq(500, rew.Code)
-	eq(`unknown error`, rew.Body.String())
+	eq(t, 500, rew.Code)
+	eq(t, `unknown error`, rew.Body.String())
 }
 
 func TestErr_full(t *testing.T) {
 	rew := ht.NewRecorder()
 	Err(fmt.Errorf(`fail`)).ServeHTTP(rew, nil)
 
-	eq(500, rew.Code)
-	eq(`fail`, rew.Body.String())
+	eq(t, 500, rew.Code)
+	eq(t, `fail`, rew.Body.String())
 }
 
 func TestHead_empty(t *testing.T) {
 	rew := ht.NewRecorder()
-	eq(200, rew.Code)
+	eq(t, 200, rew.Code)
 
 	Head{}.Write(rew)
 
-	eq(200, rew.Code)
-	eq(0, len(rew.Result().Header))
+	eq(t, 200, rew.Code)
+	eq(t, 0, len(rew.Result().Header))
 }
 
 func TestHead_full(t *testing.T) {
 	rew := ht.NewRecorder()
 	Head{Status: 201, Header: headSrc}.Write(rew)
 
-	eq(201, rew.Code)
-	eq(headExp, rew.Result().Header)
+	eq(t, 201, rew.Code)
+	eq(t, headExp, rew.Result().Header)
 }
 
 func TestReader(t *testing.T) {
@@ -82,9 +92,9 @@ func TestReader(t *testing.T) {
 	const src = `hello world`
 	Reader{Status: 201, Header: headSrc, Body: strings.NewReader(src)}.ServeHTTP(rew, nil)
 
-	eq(201, rew.Code)
-	eq(headExp, rew.Result().Header)
-	eq(src, rew.Body.String())
+	eq(t, 201, rew.Code)
+	eq(t, headExp, rew.Result().Header)
+	eq(t, src, rew.Body.String())
 }
 
 func TestBytes(t *testing.T) {
@@ -93,9 +103,9 @@ func TestBytes(t *testing.T) {
 	const src = `hello world`
 	Bytes{Status: 201, Header: headSrc, Body: []byte(src)}.ServeHTTP(rew, nil)
 
-	eq(201, rew.Code)
-	eq(headExp, rew.Result().Header)
-	eq(src, rew.Body.String())
+	eq(t, 201, rew.Code)
+	eq(t, headExp, rew.Result().Header)
+	eq(t, src, rew.Body.String())
 }
 
 func TestString(t *testing.T) {
@@ -104,9 +114,9 @@ func TestString(t *testing.T) {
 	const src = `hello world`
 	String{Status: 201, Header: headSrc, Body: src}.ServeHTTP(rew, nil)
 
-	eq(201, rew.Code)
-	eq(headExp, rew.Result().Header)
-	eq(src, rew.Body.String())
+	eq(t, 201, rew.Code)
+	eq(t, headExp, rew.Result().Header)
+	eq(t, src, rew.Body.String())
 }
 
 func TestJson(t *testing.T) {
@@ -117,9 +127,9 @@ func TestJson(t *testing.T) {
 
 	Json{Status: 201, Header: headSrc, Body: JsonVal{`hello world`}}.ServeHTTP(rew, nil)
 
-	eq(201, rew.Code)
-	eq(headExp, rew.Result().Header)
-	eq(`{"val":"hello world"}`, strings.TrimSpace(rew.Body.String()))
+	eq(t, 201, rew.Code)
+	eq(t, headExp, rew.Result().Header)
+	eq(t, `{"val":"hello world"}`, strings.TrimSpace(rew.Body.String()))
 }
 
 func TestJson_TryBytes_nil_head(t *testing.T) {
@@ -132,10 +142,10 @@ func TestJson_TryBytes_nil_head(t *testing.T) {
 	headExp := http.Header{}
 	headExp.Set(`content-type`, `application/json`)
 
-	eq(201, res.Status)
-	eq(headExp, res.Header)
-	eq(`{"val":"hello world"}`, string(res.Body))
-	eq(ptr(ErrHandler), ptr(res.ErrFunc))
+	eq(t, 201, res.Status)
+	eq(t, headExp, res.Header)
+	eq(t, `{"val":"hello world"}`, string(res.Body))
+	eq(t, ptr(ErrHandler), ptr(res.ErrFunc))
 }
 
 func TestJson_TryBytes_non_nil_head(t *testing.T) {
@@ -149,10 +159,10 @@ func TestJson_TryBytes_non_nil_head(t *testing.T) {
 	headExp := headSrc.Clone()
 	headExp.Set(`content-type`, `application/json`)
 
-	eq(201, res.Status)
-	eq(headExp, res.Header)
-	eq(`{"val":"hello world"}`, string(res.Body))
-	eq(ptr(ErrHandler), ptr(res.ErrFunc))
+	eq(t, 201, res.Status)
+	eq(t, headExp, res.Header)
+	eq(t, `{"val":"hello world"}`, string(res.Body))
+	eq(t, ptr(ErrHandler), ptr(res.ErrFunc))
 }
 
 func TestXml(t *testing.T) {
@@ -163,9 +173,9 @@ func TestXml(t *testing.T) {
 
 	Xml{Status: 201, Header: headSrc, Body: XmlVal{xml.Name{Local: `tag`}, `hello world`}}.ServeHTTP(rew, nil)
 
-	eq(201, rew.Code)
-	eq(headExp, rew.Result().Header)
-	eq(`<tag><val>hello world</val></tag>`, strings.TrimSpace(rew.Body.String()))
+	eq(t, 201, rew.Code)
+	eq(t, headExp, rew.Result().Header)
+	eq(t, `<tag><val>hello world</val></tag>`, strings.TrimSpace(rew.Body.String()))
 }
 
 func TestXml_TryBytes_nil_head(t *testing.T) {
@@ -178,10 +188,10 @@ func TestXml_TryBytes_nil_head(t *testing.T) {
 	headExp := http.Header{}
 	headExp.Set(`content-type`, `application/xml`)
 
-	eq(201, res.Status)
-	eq(headExp, res.Header)
-	eq(`<tag><val>hello world</val></tag>`, string(res.Body))
-	eq(ptr(ErrHandler), ptr(res.ErrFunc))
+	eq(t, 201, res.Status)
+	eq(t, headExp, res.Header)
+	eq(t, `<tag><val>hello world</val></tag>`, string(res.Body))
+	eq(t, ptr(ErrHandler), ptr(res.ErrFunc))
 }
 
 func TestXml_TryBytes_non_nil_head(t *testing.T) {
@@ -195,10 +205,10 @@ func TestXml_TryBytes_non_nil_head(t *testing.T) {
 	headExp := headSrc.Clone()
 	headExp.Set(`content-type`, `application/xml`)
 
-	eq(201, res.Status)
-	eq(headExp, res.Header)
-	eq(`<tag><val>hello world</val></tag>`, string(res.Body))
-	eq(ptr(ErrHandler), ptr(res.ErrFunc))
+	eq(t, 201, res.Status)
+	eq(t, headExp, res.Header)
+	eq(t, `<tag><val>hello world</val></tag>`, string(res.Body))
+	eq(t, ptr(ErrHandler), ptr(res.ErrFunc))
 }
 
 func TestRedirect(t *testing.T) {
@@ -210,9 +220,9 @@ func TestRedirect(t *testing.T) {
 
 	Redirect{Status: 301, Header: headSrc, Link: `/three`}.ServeHTTP(rew, req)
 
-	eq(301, rew.Code)
-	eq(headExp, rew.Result().Header)
-	eq(``, rew.Body.String())
+	eq(t, 301, rew.Code)
+	eq(t, headExp, rew.Result().Header)
+	eq(t, ``, rew.Body.String())
 }
 
 func TestXmlDoc(t *testing.T) {
@@ -222,22 +232,200 @@ func TestXmlDoc(t *testing.T) {
 	})
 	try(err)
 
-	eq(`<?xml version="1.0" encoding="utf-8"?><string>text</string>`, string(bytes))
+	eq(t, `<?xml version="1.0" encoding="utf-8"?><string>text</string>`, string(bytes))
+}
+
+func TestFile(t *testing.T) {
+	t.Run(`missing`, func(t *testing.T) {
+		testFile404(t, File{Path: `0589a8bfe3854d499c5e3beef89660c1`})
+	})
+
+	t.Run(`dir rather than file`, func(t *testing.T) {
+		testFile404(t, File{Path: `.`})
+	})
+
+	t.Run(`ends with slash`, func(t *testing.T) {
+		testFile404(t, File{Path: `readme.md/`})
+	})
+
+	t.Run(`exists`, func(t *testing.T) {
+		testFileOk(t, File{Path: `readme.md`}, Head{Status: 200})
+	})
+
+	t.Run(`use head`, func(t *testing.T) {
+		testFileOk(t, File{Status: 202, Path: `readme.md`}, Head{Status: 202, Header: http.Header{}})
+	})
+}
+
+func testFile404(t testing.TB, file File) {
+	eq(t, nil, file.MaybeRes(nil))
+	eq(t, file, file.Res(nil))
+
+	rew := ht.NewRecorder()
+	file.ServeHTTP(rew, nil)
+
+	eq(t, http.StatusNotFound, rew.Code)
+}
+
+func testFileOk(t testing.TB, file File, head Head) {
+	eq(t, file, file.MaybeRes(nil))
+	eq(t, file, file.Res(nil))
+
+	rew := ht.NewRecorder()
+	file.ServeHTTP(rew, pathReq(`b824014bb44242c5b20b1706a5e0a930`))
+
+	eq(t, head.Status, rew.Code)
+	if head.Header != nil {
+		eq(t, head.Header, rew.Result().Header)
+	}
+	eq(t, readFile(file.Path), rew.Body.Bytes())
+}
+
+func TestDir(t *testing.T) {
+	try(os.Chdir(`..`))
+	t.Cleanup(func() { os.Chdir(`goh`) })
+
+	t.Run(`without filter`, func(t *testing.T) {
+		dir := Dir{Path: `goh`}
+
+		t.Run(`missing`, func(t *testing.T) {
+			testDir404(t, dir, pathReq(`c5ba8aa69fff421fb4ae48c6361fa7e2`))
+		})
+
+		t.Run(`dir rather than file`, func(t *testing.T) {
+			testDir404(t, dir, pathReq(`goh/.git`))
+		})
+
+		t.Run(`ends with slash`, func(t *testing.T) {
+			testDir404(t, dir, pathReq(`readme.md/`))
+		})
+
+		t.Run(`redundant nesting`, func(t *testing.T) {
+			testDir404(t, dir, pathReq(`goh/readme.md`))
+		})
+
+		t.Run(`wrong dir`, func(t *testing.T) {
+			testDir404(t, Dir{Path: `68482a6a782445679d53786e6c08b8bd`}, pathReq(`readme.md`))
+		})
+
+		t.Run(`exists`, func(t *testing.T) {
+			testDirOk(t, dir, pathReq(`readme.md`), `goh/readme.md`)
+		})
+	})
+
+	t.Run(`with filter`, func(t *testing.T) {
+		t.Run(`not exists and not allowed`, func(t *testing.T) {
+			filter := FilterFunc(func(string) bool { return false })
+			testDir404(t, Dir{Path: `goh`, Filter: filter}, pathReq(`ffce2ef7d9cc415cab31b1d716e12c1c`))
+		})
+
+		t.Run(`not exists and allowed`, func(t *testing.T) {
+			filter := FilterFunc(func(string) bool { return true })
+			testDir404(t, Dir{Path: `goh`, Filter: filter}, pathReq(`ffce2ef7d9cc415cab31b1d716e12c1c`))
+		})
+
+		t.Run(`exists and not allowed`, func(t *testing.T) {
+			filter := FilterFunc(func(string) bool { return false })
+			testDir404(t, Dir{Path: `goh`, Filter: filter}, pathReq(`readme.md`))
+		})
+
+		t.Run(`exists and allowed`, func(t *testing.T) {
+			filter := FilterFunc(func(string) bool { return true })
+			testDirOk(t, Dir{Path: `goh`, Filter: filter}, pathReq(`readme.md`), `goh/readme.md`)
+		})
+	})
+}
+
+func testDir404(t testing.TB, dir Dir, req *http.Request) {
+	eq(t, nil, dir.MaybeRes(req))
+	eq(t, NotFound{}, dir.Res(req))
+
+	rew := ht.NewRecorder()
+	dir.ServeHTTP(rew, req)
+
+	eq(t, http.StatusNotFound, rew.Code)
+}
+
+func testDirOk(t testing.TB, dir Dir, req *http.Request, expPath string) {
+	eq(t, File{Path: expPath}, dir.MaybeRes(req))
+	eq(t, File{Path: expPath}, dir.Res(req))
+
+	testFileOk(t, File{Path: expPath}, Head{Status: http.StatusOK})
+
+	rew := ht.NewRecorder()
+	dir.ServeHTTP(rew, req)
+
+	eq(t, http.StatusOK, rew.Code)
+	eq(t, readFile(expPath), rew.Body.Bytes())
+}
+
+func Test_isSubpath(t *testing.T) {
+	test := func(exp bool, sub, sup string) {
+		t.Helper()
+		eq(t, exp, isSubpath(sub, sup))
+	}
+
+	test(false, ``, ``)
+	test(false, `one`, `one`)
+	test(false, `one`, `/one`)
+	test(false, `/one`, `one`)
+	test(false, `/one`, `/one`)
+	test(false, `one/`, `one`)
+	test(false, `one/`, `one/`)
+	test(false, `one`, `onetwo`)
+	test(false, `one/`, `onetwo`)
+	test(true, `one`, `one/`)
+	test(true, `one`, `one/two`)
+	test(true, `one`, `one/two/three`)
+	test(true, `one`, `one/two/three.four`)
+}
+
+func TestAllowDirs(t *testing.T) {
+	test := func(exp bool, dirs AllowDirs, path string) {
+		t.Helper()
+		eq(t, exp, dirs.Allow(path))
+	}
+
+	test(false, AllowDirs{}, ``)
+	test(false, AllowDirs{}, `one`)
+	test(false, AllowDirs{}, `one/`)
+
+	test(false, AllowDirs{`one`}, `two`)
+	test(false, AllowDirs{`one`}, `one`)
+	test(true, AllowDirs{`one`}, `one/`)
+	test(true, AllowDirs{`one`}, `one/two`)
+
+	test(false, AllowDirs{`one`, `two`}, `three`)
+	test(false, AllowDirs{`one`, `two`}, `three/`)
+	test(true, AllowDirs{`one`, `two`}, `one/`)
+	test(true, AllowDirs{`one`, `two`}, `one/two`)
+	test(true, AllowDirs{`one`, `two`}, `two/`)
+	test(true, AllowDirs{`one`, `two`}, `two/three`)
 }
 
 func TestHandler_error(t *testing.T) {
 	handler := Handler(func() http.Handler { panic("fail") })
-	eq(StringWith(http.StatusInternalServerError, `fail`), handler)
+	eq(t, StringWith(http.StatusInternalServerError, `fail`), handler)
 }
 
 func TestHandler_success(t *testing.T) {
 	handler := Handler(func() http.Handler { return StringOk(`ok`) })
-	eq(StringOk(`ok`), handler)
+	eq(t, StringOk(`ok`), handler)
 }
 
-func eq(exp, act interface{}) {
+func eq(t testing.TB, exp, act interface{}) {
+	t.Helper()
 	if !reflect.DeepEqual(exp, act) {
-		panic(fmt.Errorf("expected:\n%#v\ngot:\n%#v\n", exp, act))
+		t.Fatalf(`
+expected (detailed):
+	%#[1]v
+actual (detailed):
+	%#[2]v
+expected (simple):
+	%[1]v
+actual (simple):
+	%[2]v
+`, exp, act)
 	}
 }
 
@@ -249,4 +437,13 @@ func try(err error) {
 
 func ptr(val interface{}) uintptr {
 	return reflect.ValueOf(val).Pointer()
+}
+
+func pathUrl(path string) *url.URL      { return &url.URL{Path: path} }
+func pathReq(path string) *http.Request { return &http.Request{URL: pathUrl(path)} }
+
+func readFile(path string) []byte {
+	val, err := os.ReadFile(path)
+	try(err)
+	return val
 }

@@ -2,9 +2,11 @@
 
 `goh` = **Go** **H**TTP **H**andlers.
 
-Utility types that represent a not-yet-sent HTTP response as a value (status, header, body) with _no added abstractions or interfaces_. All types implement `http.Hander`.
+Utility types that represent a not-yet-sent HTTP response as a value (status, header, body) with _no added abstractions_. All types implement `http.Hander`.
 
 Recommended in conjunction with [`github.com/mitranim/rout`](https://github.com/mitranim/rout): router with support for returning responses as `http.Handler`.
+
+Small and dependency-free.
 
 See API docs at https://pkg.go.dev/github.com/mitranim/goh.
 
@@ -79,6 +81,18 @@ func writeErrAsJson(
 ```
 
 ## Changelog
+
+### `v0.1.7`
+
+Added file-serving facilities:
+
+  * `File`
+  * `Dir`
+  * `Filter`
+  * `FilterFunc`
+  * `AllowDors`
+
+This provides richer file-serving functionality than `net/http`, including the ability to serve paths from a folder selectively, or being able to "try file" and fall back on something else.
 
 ### `v0.1.6`
 

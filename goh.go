@@ -2,8 +2,8 @@
 goh = Go Http Handlers.
 
 Utility types that represent a not-yet-sent HTTP response as a value
-(status, header, body) with NO added abstractions or interfaces. All types
-implement `http.Hander`.
+(status, header, body) with NO added abstractions. All types implement
+`http.Hander`.
 
 See `readme.md` for examples.
 */
@@ -16,7 +16,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 /*
@@ -29,7 +31,7 @@ type ResFunc = func(*http.Request) http.Handler
 Signature of an error handler function provided by user code to the various
 `http.Handler` types in this library, such as `String`.
 
-When nil, `ErrHandlerDefault` is used.
+When nil, `goh.ErrHandlerDefault` is used.
 
 The `wrote` parameter indicates whether the response writer has been written to.
 If `false`, the handler should write an error response. If `true`, or if
@@ -39,14 +41,14 @@ error to the server log.
 type ErrFunc = func(rew http.ResponseWriter, req *http.Request, wrote bool, err error)
 
 /*
-Default error handler, used by `http.Handler` types when no `ErrFunc` was
-provided. May be overridden globally.
+Default error handler, used by various `http.Handler` types in this package when
+no `.ErrFunc` was provided. May be overridden globally.
 */
 var ErrHandlerDefault = ErrHandler
 
 /*
-Default implementation of `ErrFunc`. Used by `http.Handler` types, such as
-`String`, when no `ErrFunc` was provided by user code.
+Default implementation of `goh.ErrFunc`. Used by `http.Handler` types, such as
+`goh.String`, when no `goh.ErrFunc` was provided by user code.
 
 If possible, writes the error to the response writer as plain text. If not, logs
 the error to the standard error stream.
@@ -88,8 +90,6 @@ Pseudo-embedded in the various handler types, obtained via `.Head()` methods.
 Goh uses pseudo-embedding instead of actual embedding because Go doesn't allow
 promoted fields to be used at the top level of embedding type. Literals of
 various handler types would have to use `Head: Head{}`.
-
-See `Reader`, `Bytes`, `String`, `Json`, `Xml`.
 */
 type Head struct {
 	Status  int
@@ -106,7 +106,12 @@ This must be called exactly once, and only before writing the body.
 */
 func (self Head) Write(rew http.ResponseWriter) {
 	self.writeHeaders(rew)
-	if self.Status > 0 {
+
+	// The status `http.StatusOK` is implicit, and writing it should be equivalent
+	// to writing no status at all. However, there are some unwanted "smarts"
+	// inside the Go HTTP library, where writing status 200 suppresses the
+	// writing of default HEADERS following it. One example is `http.ServeFile`.
+	if self.Status != 0 && self.Status != http.StatusOK {
 		rew.WriteHeader(self.Status)
 	}
 }
@@ -145,9 +150,12 @@ This type does NOT attempt that.
 type Reader struct {
 	Status  int
 	Header  http.Header
-	Body    io.Reader
 	ErrFunc ErrFunc
+	Body    io.Reader
 }
+
+// Returns the pseudo-embedded `goh.Head` part.
+func (self Reader) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
 
 // Implement `http.Handler`.
 func (self Reader) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
@@ -162,22 +170,22 @@ func (self Reader) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// Returns the pseudo-embedded `Head` part.
-func (self Reader) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
-
-// Conforms to `ResFunc`.
+// Conforms to `goh.ResFunc`.
 func (self Reader) Res(*http.Request) http.Handler { return self }
 
 /*
-HTTP handler that writes bytes. Note: for sending a string, use `String`,
+HTTP handler that writes bytes. Note: for sending a string, use `goh.String`,
 avoiding a bytes-to-string conversion.
 */
 type Bytes struct {
 	Status  int
 	Header  http.Header
-	Body    []byte
 	ErrFunc ErrFunc
+	Body    []byte
 }
+
+// Returns the pseudo-embedded `goh.Head` part.
+func (self Bytes) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
 
 // Implement `http.Handler`.
 func (self Bytes) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
@@ -190,32 +198,32 @@ func (self Bytes) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// Returns the pseudo-embedded `Head` part.
-func (self Bytes) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
-
-// Conforms to `ResFunc`.
+// Conforms to `goh.ResFunc`.
 func (self Bytes) Res(*http.Request) http.Handler { return self }
 
-// Shortcut for `BytesWith(http.StatusOK, body)`.
+// Shortcut for `goh.BytesWith(http.StatusOK, body)`.
 func BytesOk(body []byte) Bytes {
 	return BytesWith(http.StatusOK, body)
 }
 
-// Shortcut for `Bytes` with specific status and body.
+// Shortcut for `goh.Bytes` with specific status and body.
 func BytesWith(status int, body []byte) Bytes {
 	return Bytes{Status: status, Body: body}
 }
 
 /*
-HTTP handler that writes a string. Note: for sending bytes, use `Bytes`,
+HTTP handler that writes a string. Note: for sending bytes, use `goh.Bytes`,
 avoiding a string-to-bytes conversion.
 */
 type String struct {
 	Status  int
 	Header  http.Header
-	Body    string
 	ErrFunc ErrFunc
+	Body    string
 }
+
+// Returns the pseudo-embedded `goh.Head` part.
+func (self String) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
 
 // Implement `http.Handler`.
 func (self String) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
@@ -228,18 +236,15 @@ func (self String) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// Returns the pseudo-embedded `Head` part.
-func (self String) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
-
-// Conforms to `ResFunc`.
+// Conforms to `goh.ResFunc`.
 func (self String) Res(*http.Request) http.Handler { return self }
 
-// Shortcut for `StringWith(http.StatusOK, body)`.
+// Shortcut for `goh.StringWith(http.StatusOK, body)`.
 func StringOk(body string) String {
 	return StringWith(http.StatusOK, body)
 }
 
-// Shortcut for `String` with specific status and body.
+// Shortcut for `goh.String` with specific status and body.
 func StringWith(status int, body string) String {
 	return String{Status: status, Body: body}
 }
@@ -252,9 +257,12 @@ need that feature, open an issue or PR.
 type Json struct {
 	Status  int
 	Header  http.Header
-	Body    interface{}
 	ErrFunc ErrFunc
+	Body    interface{}
 }
+
+// Returns the pseudo-embedded `goh.Head` part.
+func (self Json) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
 
 // Implement `http.Handler`.
 func (self Json) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
@@ -269,16 +277,13 @@ func (self Json) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// Returns the pseudo-embedded `Head` part.
-func (self Json) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
-
-// Conforms to `ResFunc`.
+// Conforms to `goh.ResFunc`.
 func (self Json) Res(*http.Request) http.Handler { return self }
 
 /*
-Converts to `Bytes` by encoding the body and adding the appropriate content type
-header. Panics on encoding errors. Should be used in root scope to pre-encode a
-static response:
+Converts to `goh.Bytes` by encoding the body and adding the appropriate content
+type header. Panics on encoding errors. Should be used in root scope to
+pre-encode a static response:
 
 	import "github.com/mitranim/goh"
 
@@ -292,12 +297,12 @@ func (self Json) TryBytes() Bytes {
 	return bytesFrom(self.Head(), `application/json`, body)
 }
 
-// Shortcut for `JsonWith(http.StatusOK, body)`.
+// Shortcut for `goh.JsonWith(http.StatusOK, body)`.
 func JsonOk(body interface{}) Json {
 	return JsonWith(http.StatusOK, body)
 }
 
-// Shortcut for `Json` with specific status and body.
+// Shortcut for `goh.Json` with specific status and body.
 func JsonWith(status int, body interface{}) Json {
 	return Json{Status: status, Body: body}
 }
@@ -310,9 +315,12 @@ need that feature, open an issue or PR.
 Caution: this does NOT prepend the processing instruction `<?xml?>`. When you
 don't need to specify the encoding, this instruction is entirely skippable.
 When you need to specify the encoding, wrap `.Body` in the utility type
-`XmlDoc` provided by this package.
+`goh.XmlDoc` provided by this package.
 */
 type Xml Json
+
+// Returns the pseudo-embedded `goh.Head` part.
+func (self Xml) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
 
 // Implement `http.Handler`.
 func (self Xml) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
@@ -327,16 +335,13 @@ func (self Xml) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// Returns the pseudo-embedded `Head` part.
-func (self Xml) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
-
-// Conforms to `ResFunc`.
+// Conforms to `goh.ResFunc`.
 func (self Xml) Res(*http.Request) http.Handler { return self }
 
 /*
-Converts to `Bytes` by encoding the body and adding the appropriate content type
-header. Panics on encoding errors. Should be used in root scope to pre-encode a
-static response:
+Converts to `goh.Bytes` by encoding the body and adding the appropriate content
+type header. Panics on encoding errors. Should be used in root scope to
+pre-encode a static response:
 
 	import "github.com/mitranim/goh"
 
@@ -350,25 +355,26 @@ func (self Xml) TryBytes() Bytes {
 	return bytesFrom(self.Head(), `application/xml`, body)
 }
 
-// Shortcut for `XmlWith(http.StatusOK, body)`.
+// Shortcut for `goh.XmlWith(http.StatusOK, body)`.
 func XmlOk(body interface{}) Xml {
 	return XmlWith(http.StatusOK, body)
 }
 
-// Shortcut for `Xml` with specific status and body.
+// Shortcut for `goh.Xml` with specific status and body.
 func XmlWith(status int, body interface{}) Xml {
 	return Xml{Status: status, Body: body}
 }
 
-/*
-HTTP handler that performs an HTTP redirect.
-*/
+// HTTP handler that performs an HTTP redirect.
 type Redirect struct {
 	Status  int
 	Header  http.Header
-	Link    string
 	ErrFunc ErrFunc
+	Link    string
 }
+
+// Returns the pseudo-embedded `goh.Head` part.
+func (self Redirect) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
 
 // Implement `http.Handler`.
 func (self Redirect) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
@@ -376,21 +382,18 @@ func (self Redirect) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 	http.Redirect(rew, req, self.Link, self.Status)
 }
 
-// Returns the pseudo-embedded `Head` part.
-func (self Redirect) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
-
-// Conforms to `ResFunc`.
+// Conforms to `goh.ResFunc`.
 func (self Redirect) Res(*http.Request) http.Handler { return self }
 
-// Shortcut for `Redirect` with specific status and body.
+// Shortcut for `goh.Redirect` with specific status and body.
 func RedirectWith(status int, link string) Redirect {
 	return Redirect{Status: status, Link: link}
 }
 
 /*
-Utility type for use together with `Xml`. When encoded as XML, this prepends the
-`<?xml?>` header with version 1.0 and the specified encoding, if any. Example
-usage:
+Utility type for use together with `goh.Xml`. When encoded as XML, this prepends
+the `<?xml?>` header with version 1.0 and the specified encoding, if any.
+Example usage:
 
 	myXmlDoc := SomeType{SomeField: someValue}
 
@@ -409,6 +412,8 @@ type XmlDoc struct {
 	Val      interface{}
 }
 
+// Implement `encoding/xml.Marshaler`, prepending the `<?xml?>` processing
+// instruction, with the specified encoding if available.
 func (self XmlDoc) MarshalXML(enc *xml.Encoder, _ xml.StartElement) error {
 	inst := xmlVersionInst
 	if self.Encoding != "" {
@@ -426,6 +431,173 @@ func (self XmlDoc) MarshalXML(enc *xml.Encoder, _ xml.StartElement) error {
 
 	return enc.Encode(self.Val)
 }
+
+/*
+HTTP handler that always serves a file at a specific FS path. For each request,
+it verifies that the file exists and delegates to `http.ServeFile`. If the file
+doesn't exist, this responds with 404 without calling `http.ServeFile`,
+avoiding its undesirable "smarts".
+
+Unlike `http.ServeFile` and `http.FileServer`, responding with 404 is optional.
+`goh.File.MaybeRes` returns a nil handler if the file is not found. You can use
+this to "try" serving a file, and fall back on something else.
+*/
+type File struct {
+	Status  int
+	Header  http.Header
+	ErrFunc ErrFunc
+	Path    string
+}
+
+// Returns the pseudo-embedded `goh.Head` part.
+func (self File) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
+
+// Implement `http.Handler`.
+func (self File) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
+	self.Head().Write(rew)
+
+	if fileExists(self.Path) {
+		http.ServeFile(rew, req, self.Path)
+	} else {
+		NotFound{}.ServeHTTP(rew, req)
+	}
+}
+
+// Conforms to `goh.ResFunc`. Always returns non-nil.
+func (self File) Res(*http.Request) http.Handler { return self }
+
+// Conforms to `goh.ResFunc`. Returns self if file exists, otherwise returns nil.
+// Can be used to "try" serving a file.
+func (self File) MaybeRes(*http.Request) http.Handler {
+	if fileExists(self.Path) {
+		return self
+	}
+	return nil
+}
+
+/*
+HTTP handler that serves files out of a given directory. Similar to
+`http.FileServer`, but without its undesirable "smarts". This will serve only
+individual files, without directory listings or redirects. In addition, the
+method `goh.Dir.MaybeRes` supports "try file" functionality, allowing you to
+fall back on serving something else when a requested file is not found.
+
+The status, header, and err func are copied to each `goh.File` used for each
+response.
+*/
+type Dir struct {
+	Status  int
+	Header  http.Header
+	ErrFunc ErrFunc
+	Path    string
+	Filter  Filter
+}
+
+// Returns the pseudo-embedded `goh.Head` part.
+func (self Dir) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
+
+// Implement `http.Handler`.
+func (self Dir) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
+	self.Res(req).ServeHTTP(rew, req)
+}
+
+// Conforms to `goh.ResFunc`. Always returns non-nil.
+func (self Dir) Res(req *http.Request) http.Handler {
+	res := self.MaybeRes(req)
+	if res != nil {
+		return res
+	}
+	return NotFound{}
+}
+
+// Conforms to `goh.ResFunc`. Returns nil if requested file is not found.
+func (self Dir) MaybeRes(req *http.Request) http.Handler {
+	reqPath := strings.TrimPrefix(req.URL.Path, `/`)
+	if strings.Contains(reqPath, `..`) || strings.HasSuffix(reqPath, `/`) {
+		return nil
+	}
+
+	filePath := filepath.Join(self.Path, reqPath)
+	if !self.allow(filePath) {
+		return nil
+	}
+
+	return self.file(filePath).MaybeRes(req)
+}
+
+func (self Dir) allow(path string) bool {
+	if self.Filter != nil {
+		return self.Filter.Allow(filepath.ToSlash(path))
+	}
+	return true
+}
+
+func (self Dir) file(path string) File {
+	return File{
+		Status:  self.Status,
+		Header:  self.Header,
+		ErrFunc: self.ErrFunc,
+		Path:    path,
+	}
+}
+
+/*
+Used by `goh.Dir` to allow or deny serving specific paths. The input to `.Allow`
+is a normalized filesystem path that uses Unix-style forward slashes on both
+Unix and Windows. The path starts with `goh.Dir.Path`. For example:
+
+	dir := goh.Dir{Path: `static`}
+	req := &http.Request{URL: &url.URL{Path: `/some_file`}}
+	dir.Res(req)
+	->
+	dir.Filter.Allow(`static/some_file`)
+*/
+type Filter interface {
+	Allow(string) bool
+}
+
+/*
+Function type that implements `goh.Filter`. Example usage:
+
+	goh.Dir{Path: `.`, Filter: goh.FilterFunc(regexp.MustCompile(`^status/`))}
+*/
+type FilterFunc func(string) bool
+
+// Implement `goh.Filter` by calling itself.
+func (self FilterFunc) Allow(val string) bool {
+	if self != nil {
+		return self(val)
+	}
+	return false
+}
+
+/*
+Implements `goh.Filter` by requiring that the input path is contained within one
+of the given directories. "Contained" means it begins with the directory path
+followed by a path separator.
+*/
+type AllowDirs []string
+
+// Implement `goh.Filter`.
+func (self AllowDirs) Allow(val string) bool {
+	for _, dir := range self {
+		if isSubpath(dir, val) {
+			return true
+		}
+	}
+	return false
+}
+
+// Zero-sized handler that returns with 404 without any additional headers
+// or body content. Used internally by `goh.File`.
+type NotFound struct{}
+
+func (NotFound) ServeHTTP(rew http.ResponseWriter, _ *http.Request) {
+	rew.WriteHeader(http.StatusNotFound)
+}
+
+// Conforms to `goh.ResFunc`, returning self.
+func (self NotFound) Res(req *http.Request) http.Handler { return self }
 
 /*
 Runs the provided function, returning the resulting `http.Handler`. Catches
@@ -494,7 +666,17 @@ func bytesFrom(head Head, contentType string, body []byte) Bytes {
 	return Bytes{
 		Status:  head.Status,
 		Header:  header,
-		Body:    body,
 		ErrFunc: head.ErrFunc,
+		Body:    body,
 	}
+}
+
+func fileExists(path string) bool {
+	stat, _ := os.Stat(path)
+	return stat != nil && !stat.IsDir()
+}
+
+func isSubpath(sup, sub string) bool {
+	return strings.HasPrefix(sub, sup) &&
+		strings.HasPrefix(sub[len(sup):], `/`)
 }
