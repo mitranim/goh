@@ -82,6 +82,12 @@ func writeErrAsJson(
 
 ## Changelog
 
+### `v0.1.8`
+
+Lexicon change: "Res" → "Han" for functions that return `http.Handler`.
+
+Add `TryJsonBytes`.
+
 ### `v0.1.7`
 
 Added file-serving facilities:

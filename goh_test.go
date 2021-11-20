@@ -25,17 +25,17 @@ var (
 )
 
 var (
-	_ = ResFunc(Reader{}.Res)
-	_ = ResFunc(Bytes{}.Res)
-	_ = ResFunc(String{}.Res)
-	_ = ResFunc(Json{}.Res)
-	_ = ResFunc(Xml{}.Res)
-	_ = ResFunc(Redirect{}.Res)
-	_ = ResFunc(File{}.Res)
-	_ = ResFunc(File{}.MaybeRes)
-	_ = ResFunc(Dir{}.Res)
-	_ = ResFunc(Dir{}.MaybeRes)
-	_ = ResFunc(NotFound{}.Res)
+	_ = Han(Reader{}.Han)
+	_ = Han(Bytes{}.Han)
+	_ = Han(String{}.Han)
+	_ = Han(Json{}.Han)
+	_ = Han(Xml{}.Han)
+	_ = Han(Redirect{}.Han)
+	_ = Han(File{}.Han)
+	_ = Han(File{}.MaybeHan)
+	_ = Han(Dir{}.Han)
+	_ = Han(Dir{}.MaybeHan)
+	_ = Han(NotFound{}.Han)
 )
 
 type JsonVal struct {
@@ -48,8 +48,8 @@ type XmlVal struct {
 }
 
 var (
-	headSrc = http.Header{`one`: {`two`}, `three`: {`four`}}
-	headExp = http.Header{`One`: {`two`}, `Three`: {`four`}}
+	headSrc = http.Header{`One`: {`two`}, `three`: {`four`}}
+	headExp = http.Header{`One`: {`two`}, `three`: {`four`}}
 )
 
 func TestErr_empty(t *testing.T) {
@@ -66,6 +66,18 @@ func TestErr_full(t *testing.T) {
 
 	eq(t, 500, rew.Code)
 	eq(t, `fail`, rew.Body.String())
+}
+
+func TestTryJsonBytes(t *testing.T) {
+	eq(
+		t,
+		Bytes{
+			Status: http.StatusOK,
+			Header: http.Header{`Content-Type`: {`application/json`}},
+			Body:   []byte(`{"val":"one"}`),
+		},
+		TryJsonBytes(JsonVal{`one`}),
+	)
 }
 
 func TestHead_empty(t *testing.T) {
@@ -258,8 +270,8 @@ func TestFile(t *testing.T) {
 }
 
 func testFile404(t testing.TB, file File) {
-	eq(t, nil, file.MaybeRes(nil))
-	eq(t, file, file.Res(nil))
+	eq(t, nil, file.MaybeHan(nil))
+	eq(t, file, file.Han(nil))
 
 	rew := ht.NewRecorder()
 	file.ServeHTTP(rew, nil)
@@ -268,8 +280,8 @@ func testFile404(t testing.TB, file File) {
 }
 
 func testFileOk(t testing.TB, file File, head Head) {
-	eq(t, file, file.MaybeRes(nil))
-	eq(t, file, file.Res(nil))
+	eq(t, file, file.MaybeHan(nil))
+	eq(t, file, file.Han(nil))
 
 	rew := ht.NewRecorder()
 	file.ServeHTTP(rew, pathReq(`b824014bb44242c5b20b1706a5e0a930`))
@@ -337,8 +349,8 @@ func TestDir(t *testing.T) {
 }
 
 func testDir404(t testing.TB, dir Dir, req *http.Request) {
-	eq(t, nil, dir.MaybeRes(req))
-	eq(t, NotFound{}, dir.Res(req))
+	eq(t, nil, dir.MaybeHan(req))
+	eq(t, NotFound{}, dir.Han(req))
 
 	rew := ht.NewRecorder()
 	dir.ServeHTTP(rew, req)
@@ -347,8 +359,8 @@ func testDir404(t testing.TB, dir Dir, req *http.Request) {
 }
 
 func testDirOk(t testing.TB, dir Dir, req *http.Request, expPath string) {
-	eq(t, File{Path: expPath}, dir.MaybeRes(req))
-	eq(t, File{Path: expPath}, dir.Res(req))
+	eq(t, File{Path: expPath}, dir.MaybeHan(req))
+	eq(t, File{Path: expPath}, dir.Han(req))
 
 	testFileOk(t, File{Path: expPath}, Head{Status: http.StatusOK})
 
