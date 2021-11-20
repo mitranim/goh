@@ -53,13 +53,13 @@ func handler(req *http.Request) http.Handler {
 
 // You can customize the default error handler.
 func init() {
-  goh.ErrHandlerDefault = writeErrAsJson
+  goh.HandleErr = writeErrAsJson
 }
 
 // Example custom error handler.
 // Should be provided to response types as `ErrFunc: writeErrAsJson`.
 func writeErrAsJson(
-  rew http.ResponseWriter, req *http.Request, wrote bool, err error,
+  rew http.ResponseWriter, req *http.Request, err error, wrote bool,
 ) {
   if err == nil {
     return
@@ -67,20 +67,22 @@ func writeErrAsJson(
 
   if !wrote {
     rew.WriteHeader(http.StatusInternalServerError)
-    err = json.NewEncoder(rew).Encode(ErrJson{err})
+    err := json.NewEncoder(rew).Encode(ErrJson{err})
     if err != nil {
-      // Logged below.
-      err = fmt.Errorf(`secondary error while writing error response: %w`, err)
+      fmt.Fprintf(os.Stderr, "secondary error while writing error response: %+v\n", err)
+      return
     }
   }
 
-  if err != nil {
-    fmt.Fprintf(os.Stderr, "%+v\n", err)
-  }
+  fmt.Fprintf(os.Stderr, "error while writing HTTP response: %+v\n", err)
 }
 ```
 
 ## Changelog
+
+### `v0.1.9`
+
+Cosmetic renaming and minor cleanup. Renamed `ErrHandlerDefault` → `HandleErr`, `ErrHandler` → `WriteErr`, tweaked argument order in `ErrFunc`, tweaked default error handling in `WriteErr`, tweaked error messages.
 
 ### `v0.1.8`
 

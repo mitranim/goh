@@ -148,7 +148,7 @@ func TestJson_TryBytes_nil_head(t *testing.T) {
 	res := Json{
 		Status:  201,
 		Body:    JsonVal{`hello world`},
-		ErrFunc: ErrHandler,
+		ErrFunc: WriteErr,
 	}.TryBytes()
 
 	headExp := http.Header{}
@@ -157,7 +157,7 @@ func TestJson_TryBytes_nil_head(t *testing.T) {
 	eq(t, 201, res.Status)
 	eq(t, headExp, res.Header)
 	eq(t, `{"val":"hello world"}`, string(res.Body))
-	eq(t, ptr(ErrHandler), ptr(res.ErrFunc))
+	eq(t, ptr(WriteErr), ptr(res.ErrFunc))
 }
 
 func TestJson_TryBytes_non_nil_head(t *testing.T) {
@@ -165,7 +165,7 @@ func TestJson_TryBytes_non_nil_head(t *testing.T) {
 		Status:  201,
 		Header:  headSrc,
 		Body:    JsonVal{`hello world`},
-		ErrFunc: ErrHandler,
+		ErrFunc: WriteErr,
 	}.TryBytes()
 
 	headExp := headSrc.Clone()
@@ -174,7 +174,7 @@ func TestJson_TryBytes_non_nil_head(t *testing.T) {
 	eq(t, 201, res.Status)
 	eq(t, headExp, res.Header)
 	eq(t, `{"val":"hello world"}`, string(res.Body))
-	eq(t, ptr(ErrHandler), ptr(res.ErrFunc))
+	eq(t, ptr(WriteErr), ptr(res.ErrFunc))
 }
 
 func TestXml(t *testing.T) {
@@ -194,7 +194,7 @@ func TestXml_TryBytes_nil_head(t *testing.T) {
 	res := Xml{
 		Status:  201,
 		Body:    XmlVal{xml.Name{Local: `tag`}, `hello world`},
-		ErrFunc: ErrHandler,
+		ErrFunc: WriteErr,
 	}.TryBytes()
 
 	headExp := http.Header{}
@@ -203,7 +203,7 @@ func TestXml_TryBytes_nil_head(t *testing.T) {
 	eq(t, 201, res.Status)
 	eq(t, headExp, res.Header)
 	eq(t, `<tag><val>hello world</val></tag>`, string(res.Body))
-	eq(t, ptr(ErrHandler), ptr(res.ErrFunc))
+	eq(t, ptr(WriteErr), ptr(res.ErrFunc))
 }
 
 func TestXml_TryBytes_non_nil_head(t *testing.T) {
@@ -211,7 +211,7 @@ func TestXml_TryBytes_non_nil_head(t *testing.T) {
 		Status:  201,
 		Header:  headSrc,
 		Body:    XmlVal{xml.Name{Local: `tag`}, `hello world`},
-		ErrFunc: ErrHandler,
+		ErrFunc: WriteErr,
 	}.TryBytes()
 
 	headExp := headSrc.Clone()
@@ -220,7 +220,7 @@ func TestXml_TryBytes_non_nil_head(t *testing.T) {
 	eq(t, 201, res.Status)
 	eq(t, headExp, res.Header)
 	eq(t, `<tag><val>hello world</val></tag>`, string(res.Body))
-	eq(t, ptr(ErrHandler), ptr(res.ErrFunc))
+	eq(t, ptr(WriteErr), ptr(res.ErrFunc))
 }
 
 func TestRedirect(t *testing.T) {

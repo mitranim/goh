@@ -29,50 +29,51 @@ type Han = func(*http.Request) http.Handler
 
 /*
 Signature of an error handler function provided by user code to the various
-`http.Handler` types in this library, such as `String`.
-
-When nil, `goh.ErrHandlerDefault` is used.
+`http.Handler` types in this library, such as `String`. When nil,
+`goh.HandleErr` is used.
 
 The `wrote` parameter indicates whether the response writer has been written to.
 If `false`, the handler should write an error response. If `true`, or if
 sending the error response has failed, the handler should log the resulting
 error to the server log.
 */
-type ErrFunc = func(rew http.ResponseWriter, req *http.Request, wrote bool, err error)
+type ErrFunc = func(rew http.ResponseWriter, req *http.Request, err error, wrote bool)
 
 /*
 Default error handler, used by various `http.Handler` types in this package when
 no `.ErrFunc` was provided. May be overridden globally.
 */
-var ErrHandlerDefault = ErrHandler
+var HandleErr = WriteErr
 
 /*
 Default implementation of `goh.ErrFunc`. Used by `http.Handler` types, such as
-`goh.String`, when no `goh.ErrFunc` was provided by user code.
-
-If possible, writes the error to the response writer as plain text. If not, logs
-the error to the standard error stream.
-
-When implementing a custom error handler, use this function's source as an
-example.
+`goh.String`, when no `goh.ErrFunc` was provided by user code. If possible,
+writes the error to the response writer as plain text. If not, logs the error
+to the standard error stream. When implementing a custom error handler, use
+this function's source as an example.
 */
-func ErrHandler(rew http.ResponseWriter, _ *http.Request, wrote bool, err error) {
+func WriteErr(rew http.ResponseWriter, _ *http.Request, err error, wrote bool) {
 	if err == nil {
 		return
 	}
 
 	if !wrote {
 		rew.WriteHeader(http.StatusInternalServerError)
-		_, err = io.WriteString(rew, err.Error())
-		if err != nil {
-			// Logged below.
-			err = fmt.Errorf(`secondary error while writing error response: %w`, err)
+		_, inner := io.WriteString(rew, err.Error())
+		if inner == nil {
+			return
 		}
+
+		fmt.Fprintf(
+			os.Stderr,
+			"unexpected error while writing HTTP response: %+v\n"+
+				"unexpected secondary error while writing error response: %+v\n",
+			err, inner,
+		)
+		return
 	}
 
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%+v\n", err)
-	}
+	fmt.Fprintf(os.Stderr, "unexpected error while writing HTTP response: %+v\n", err)
 }
 
 /*
@@ -95,8 +96,8 @@ The head part of each `http.Handler` implementation in this package.
 Pseudo-embedded in the various handler types, obtained via `.Head()` methods.
 
 Goh uses pseudo-embedding instead of actual embedding because Go doesn't allow
-promoted fields to be used at the top level of embedding type. Literals of
-various handler types would have to use `Head: Head{}`.
+promoted fields to be used at the top level of embedding type. With embedding,
+literals of various handler types would have to use `Head: Head{}`.
 */
 type Head struct {
 	Status  int
@@ -114,10 +115,12 @@ This must be called exactly once, and only before writing the body.
 func (self Head) Write(rew http.ResponseWriter) {
 	self.writeHeaders(rew)
 
-	// The status `http.StatusOK` is implicit, and writing it should be equivalent
-	// to writing no status at all. However, there are some unwanted "smarts"
-	// inside the Go HTTP library, where writing status 200 suppresses the
-	// writing of default HEADERS following it. One example is `http.ServeFile`.
+	/**
+	The status `http.StatusOK` is implicit, and writing it should be equivalent to
+	writing no status at all. However, there are some unwanted "smarts" inside
+	the Go HTTP library, where writing status 200 suppresses the writing of
+	default HEADERS following it. One example is `http.ServeFile`.
+	*/
 	if self.Status != 0 && self.Status != http.StatusOK {
 		rew.WriteHeader(self.Status)
 	}
@@ -131,18 +134,10 @@ func (self Head) writeHeaders(rew http.ResponseWriter) {
 }
 
 func (self Head) errFunc() ErrFunc {
-	fun := self.ErrFunc
-	if fun != nil {
-		return fun
+	if self.ErrFunc != nil {
+		return self.ErrFunc
 	}
-	return ErrHandlerDefault
-}
-
-func (self Head) handleErr(rew http.ResponseWriter, req *http.Request, wrote bool, err error) {
-	if err == nil {
-		return
-	}
-	self.errFunc()(rew, req, wrote, err)
+	return HandleErr
 }
 
 /*
@@ -159,7 +154,9 @@ type Reader struct {
 }
 
 // Returns the pseudo-embedded `goh.Head` part.
-func (self Reader) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
+func (self Reader) Head() Head {
+	return Head{self.Status, self.Header, self.ErrFunc}
+}
 
 // Implement `http.Handler`.
 func (self Reader) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
@@ -168,8 +165,8 @@ func (self Reader) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 	if self.Body != nil {
 		_, err := io.Copy(rew, self.Body)
 		if err != nil {
-			err = fmt.Errorf(`failed to copy response from reader: %w`, err)
-			self.Head().handleErr(rew, req, true, err)
+			err = fmt.Errorf(`[goh] failed to copy response from reader: %w`, err)
+			self.Head().errFunc()(rew, req, err, true)
 		}
 	}
 }
@@ -189,7 +186,9 @@ type Bytes struct {
 }
 
 // Returns the pseudo-embedded `goh.Head` part.
-func (self Bytes) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
+func (self Bytes) Head() Head {
+	return Head{self.Status, self.Header, self.ErrFunc}
+}
 
 // Implement `http.Handler`.
 func (self Bytes) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
@@ -197,8 +196,8 @@ func (self Bytes) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 
 	_, err := rew.Write(self.Body)
 	if err != nil {
-		err = fmt.Errorf(`failed to write response bytes: %w`, err)
-		self.Head().handleErr(rew, req, true, err)
+		err = fmt.Errorf(`[goh] failed to write response bytes: %w`, err)
+		self.Head().errFunc()(rew, req, err, true)
 	}
 }
 
@@ -227,7 +226,9 @@ type String struct {
 }
 
 // Returns the pseudo-embedded `goh.Head` part.
-func (self String) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
+func (self String) Head() Head {
+	return Head{self.Status, self.Header, self.ErrFunc}
+}
 
 // Implement `http.Handler`.
 func (self String) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
@@ -235,8 +236,8 @@ func (self String) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 
 	_, err := io.WriteString(rew, self.Body)
 	if err != nil {
-		err = fmt.Errorf(`failed to write response string: %w`, err)
-		self.Head().handleErr(rew, req, true, err)
+		err = fmt.Errorf(`[goh] failed to write response string: %w`, err)
+		self.Head().errFunc()(rew, req, err, true)
 	}
 }
 
@@ -266,7 +267,9 @@ type Json struct {
 }
 
 // Returns the pseudo-embedded `goh.Head` part.
-func (self Json) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
+func (self Json) Head() Head {
+	return Head{self.Status, self.Header, self.ErrFunc}
+}
 
 // Implement `http.Handler`.
 func (self Json) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
@@ -276,8 +279,8 @@ func (self Json) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 	writer := spyingWriter{Writer: rew}
 	err := json.NewEncoder(&writer).Encode(self.Body)
 	if err != nil {
-		err = fmt.Errorf(`failed to write response as JSON: %w`, err)
-		self.Head().handleErr(rew, req, writer.wrote, err)
+		err = fmt.Errorf(`[goh] failed to write response as JSON: %w`, err)
+		self.Head().errFunc()(rew, req, err, writer.wrote)
 	}
 }
 
@@ -324,7 +327,9 @@ When you need to specify the encoding, wrap `.Body` in the utility type
 type Xml Json
 
 // Returns the pseudo-embedded `goh.Head` part.
-func (self Xml) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
+func (self Xml) Head() Head {
+	return Head{self.Status, self.Header, self.ErrFunc}
+}
 
 // Implement `http.Handler`.
 func (self Xml) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
@@ -334,8 +339,8 @@ func (self Xml) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 	writer := spyingWriter{Writer: rew}
 	err := xml.NewEncoder(&writer).Encode(self.Body)
 	if err != nil {
-		err = fmt.Errorf(`failed to write response as XML: %w`, err)
-		self.Head().handleErr(rew, req, writer.wrote, err)
+		err = fmt.Errorf(`[goh] failed to write response as XML: %w`, err)
+		self.Head().errFunc()(rew, req, err, writer.wrote)
 	}
 }
 
@@ -378,7 +383,9 @@ type Redirect struct {
 }
 
 // Returns the pseudo-embedded `goh.Head` part.
-func (self Redirect) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
+func (self Redirect) Head() Head {
+	return Head{self.Status, self.Header, self.ErrFunc}
+}
 
 // Implement `http.Handler`.
 func (self Redirect) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
@@ -454,7 +461,9 @@ type File struct {
 }
 
 // Returns the pseudo-embedded `goh.Head` part.
-func (self File) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
+func (self File) Head() Head {
+	return Head{self.Status, self.Header, self.ErrFunc}
+}
 
 // Implement `http.Handler`.
 func (self File) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
@@ -498,7 +507,9 @@ type Dir struct {
 }
 
 // Returns the pseudo-embedded `goh.Head` part.
-func (self Dir) Head() Head { return Head{self.Status, self.Header, self.ErrFunc} }
+func (self Dir) Head() Head {
+	return Head{self.Status, self.Header, self.ErrFunc}
+}
 
 // Implement `http.Handler`.
 func (self Dir) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
@@ -592,8 +603,10 @@ func (self AllowDirs) Allow(val string) bool {
 	return false
 }
 
-// Zero-sized handler that returns with 404 without any additional headers
-// or body content. Used internally by `goh.File`.
+/*
+Zero-sized handler that returns with 404 without any additional headers or body
+content. Used internally by `goh.File`.
+*/
 type NotFound struct{}
 
 func (NotFound) ServeHTTP(rew http.ResponseWriter, _ *http.Request) {
@@ -649,27 +662,27 @@ func recHandler(ptr *http.Handler) {
 	}
 
 	err, _ := val.(error)
-	if err == nil {
-		err = fmt.Errorf(`%v`, val)
+	if err != nil {
+		*ptr = Err(err)
+		return
 	}
 
-	*ptr = Err(err)
-}
-
-func cloneHeader(val http.Header, size int) http.Header {
-	if val == nil {
-		return make(http.Header, size)
-	}
-	return val.Clone()
+	*ptr = StringWith(http.StatusInternalServerError, fmt.Sprint(val))
 }
 
 func bytesFrom(head Head, contentType string, body []byte) Bytes {
-	header := cloneHeader(head.Header, 1)
-	header.Set(`Content-Type`, contentType)
+	if contentType != `` {
+		if head.Header == nil {
+			head.Header = http.Header{`Content-Type`: {contentType}}
+		} else {
+			head.Header = head.Header.Clone()
+			head.Header.Set(`Content-Type`, contentType)
+		}
+	}
 
 	return Bytes{
 		Status:  head.Status,
-		Header:  header,
+		Header:  head.Header,
 		ErrFunc: head.ErrFunc,
 		Body:    body,
 	}
