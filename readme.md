@@ -80,6 +80,10 @@ func writeErrAsJson(
 
 ## Changelog
 
+### `v0.1.10`
+
+`Json` and `Xml` now support pretty-printing via field `.Indent`.
+
 ### `v0.1.9`
 
 Cosmetic renaming and minor cleanup. Renamed `ErrHandlerDefault` → `HandleErr`, `ErrHandler` → `WriteErr`, tweaked argument order in `ErrFunc`, tweaked default error handling in `WriteErr`, tweaked error messages.

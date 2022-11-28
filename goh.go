@@ -21,6 +21,13 @@ import (
 	"strings"
 )
 
+const (
+	HeadType  = `Content-Type`
+	TypeJson  = `application/json`
+	TypeForm  = `application/x-www-form-urlencoded`
+	TypeMulti = `multipart/form-data`
+)
+
 /*
 Signature of a "request->response" function. All Goh handler types have a method
 `.Han` that conforms to this signature.
@@ -256,13 +263,13 @@ func StringWith(status int, body string) String {
 
 /*
 HTTP handler that automatically sets the appropriate JSON headers and encodes
-its body as JSON. Currently does not support custom options for the JSON
-encoder; if you need that feature, open an issue or PR.
+its body as JSON. The field `.Indent` is passed to the JSON encoder.
 */
 type Json struct {
 	Status  int
 	Header  http.Header
 	ErrFunc ErrFunc
+	Indent  string
 	Body    interface{}
 }
 
@@ -273,11 +280,14 @@ func (self Json) Head() Head {
 
 // Implement `http.Handler`.
 func (self Json) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
-	rew.Header().Set(`Content-Type`, `application/json`)
+	rew.Header().Set(HeadType, TypeJson)
 	self.Head().Write(rew)
 
 	writer := spyingWriter{Writer: rew}
-	err := json.NewEncoder(&writer).Encode(self.Body)
+	enc := json.NewEncoder(&writer)
+	enc.SetIndent(``, self.Indent)
+
+	err := enc.Encode(self.Body)
 	if err != nil {
 		err = fmt.Errorf(`[goh] failed to write response as JSON: %w`, err)
 		self.Head().errFunc()(rew, req, err, writer.wrote)
@@ -297,11 +307,19 @@ pre-encode a static response:
 	var someHan = goh.JsonOk(someValue).TryBytes()
 */
 func (self Json) TryBytes() Bytes {
-	body, err := json.Marshal(self.Body)
+	var body []byte
+	var err error
+
+	if self.Indent == `` {
+		body, err = json.Marshal(self.Body)
+	} else {
+		body, err = json.MarshalIndent(self.Body, ``, self.Indent)
+	}
+
 	if err != nil {
 		panic(err)
 	}
-	return bytesFrom(self.Head(), `application/json`, body)
+	return bytesFrom(self.Head(), TypeJson, body)
 }
 
 // Shortcut for `goh.JsonWith(http.StatusOK, body)`.
@@ -316,8 +334,7 @@ func JsonWith(status int, body interface{}) Json {
 
 /*
 HTTP handler that automatically sets the appropriate XML headers and encodes its
-body as XML. Currently does not support custom options for the XML encoder; if
-you need that feature, open an issue or PR.
+body as XML. The field `.Indent` is passed to the JSON encoder.
 
 Caution: this does NOT prepend the processing instruction `<?xml?>`. When you
 don't need to specify the encoding, this instruction is entirely skippable.
@@ -333,11 +350,14 @@ func (self Xml) Head() Head {
 
 // Implement `http.Handler`.
 func (self Xml) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
-	rew.Header().Set(`Content-Type`, `application/xml`)
+	rew.Header().Set(HeadType, `application/xml`)
 	self.Head().Write(rew)
 
 	writer := spyingWriter{Writer: rew}
-	err := xml.NewEncoder(&writer).Encode(self.Body)
+	enc := xml.NewEncoder(&writer)
+	enc.Indent(``, self.Indent)
+
+	err := enc.Encode(self.Body)
 	if err != nil {
 		err = fmt.Errorf(`[goh] failed to write response as XML: %w`, err)
 		self.Head().errFunc()(rew, req, err, writer.wrote)
@@ -357,7 +377,15 @@ pre-encode a static response:
 	var someHan = goh.XmlOk(someValue).TryBytes()
 */
 func (self Xml) TryBytes() Bytes {
-	body, err := xml.Marshal(self.Body)
+	var body []byte
+	var err error
+
+	if self.Indent == `` {
+		body, err = xml.Marshal(self.Body)
+	} else {
+		body, err = xml.MarshalIndent(self.Body, ``, self.Indent)
+	}
+
 	if err != nil {
 		panic(err)
 	}
@@ -673,10 +701,10 @@ func recHandler(ptr *http.Handler) {
 func bytesFrom(head Head, contentType string, body []byte) Bytes {
 	if contentType != `` {
 		if head.Header == nil {
-			head.Header = http.Header{`Content-Type`: {contentType}}
+			head.Header = http.Header{HeadType: {contentType}}
 		} else {
 			head.Header = head.Header.Clone()
-			head.Header.Set(`Content-Type`, contentType)
+			head.Header.Set(HeadType, contentType)
 		}
 	}
 

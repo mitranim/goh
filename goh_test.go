@@ -52,6 +52,8 @@ var (
 	headExp = http.Header{`One`: {`two`}, `three`: {`four`}}
 )
 
+type Dict = map[string]interface{}
+
 func TestErr_empty(t *testing.T) {
 	rew := ht.NewRecorder()
 	Err(nil).ServeHTTP(rew, nil)
@@ -73,7 +75,7 @@ func TestTryJsonBytes(t *testing.T) {
 		t,
 		Bytes{
 			Status: http.StatusOK,
-			Header: http.Header{`Content-Type`: {`application/json`}},
+			Header: http.Header{HeadType: {TypeJson}},
 			Body:   []byte(`{"val":"one"}`),
 		},
 		TryJsonBytes(JsonVal{`one`}),
@@ -135,7 +137,7 @@ func TestJson(t *testing.T) {
 	rew := ht.NewRecorder()
 
 	headExp := headExp.Clone()
-	headExp.Set(`content-type`, `application/json`)
+	headExp.Set(`content-type`, TypeJson)
 
 	Json{Status: 201, Header: headSrc, Body: JsonVal{`hello world`}}.ServeHTTP(rew, nil)
 
@@ -152,7 +154,7 @@ func TestJson_TryBytes_nil_head(t *testing.T) {
 	}.TryBytes()
 
 	headExp := http.Header{}
-	headExp.Set(`content-type`, `application/json`)
+	headExp.Set(`content-type`, TypeJson)
 
 	eq(t, 201, res.Status)
 	eq(t, headExp, res.Header)
@@ -169,12 +171,33 @@ func TestJson_TryBytes_non_nil_head(t *testing.T) {
 	}.TryBytes()
 
 	headExp := headSrc.Clone()
-	headExp.Set(`content-type`, `application/json`)
+	headExp.Set(`content-type`, TypeJson)
 
 	eq(t, 201, res.Status)
 	eq(t, headExp, res.Header)
 	eq(t, `{"val":"hello world"}`, string(res.Body))
 	eq(t, ptr(WriteErr), ptr(res.ErrFunc))
+}
+
+var jsonIndentSrc = Dict{`one`: Dict{`two`: 10}}
+
+var jsonIndentOut = `{
+  "one": {
+    "two": 10
+  }
+}`
+
+func TestJson_ServeHTTP_indent(t *testing.T) {
+	rew := ht.NewRecorder()
+	Json{Body: jsonIndentSrc, Indent: `  `}.ServeHTTP(rew, nil)
+	eq(t, jsonIndentOut, strings.TrimSpace(rew.Body.String()))
+}
+
+func TestJson_TryBytes_indent(t *testing.T) {
+	eq(t, jsonIndentOut, string(Json{
+		Body:   jsonIndentSrc,
+		Indent: `  `,
+	}.TryBytes().Body))
 }
 
 func TestXml(t *testing.T) {
@@ -221,6 +244,25 @@ func TestXml_TryBytes_non_nil_head(t *testing.T) {
 	eq(t, headExp, res.Header)
 	eq(t, `<tag><val>hello world</val></tag>`, string(res.Body))
 	eq(t, ptr(WriteErr), ptr(res.ErrFunc))
+}
+
+var xmlIndentSrc = XmlVal{xml.Name{Local: `tag`}, `hello world`}
+
+var xmlIndentOut = `<tag>
+  <val>hello world</val>
+</tag>`
+
+func TestXml_ServeHTTP_indent(t *testing.T) {
+	rew := ht.NewRecorder()
+	Xml{Body: xmlIndentSrc, Indent: `  `}.ServeHTTP(rew, nil)
+	eq(t, xmlIndentOut, strings.TrimSpace(rew.Body.String()))
+}
+
+func TestXml_TryBytes_indent(t *testing.T) {
+	eq(t, xmlIndentOut, string(Xml{
+		Body:   xmlIndentSrc,
+		Indent: `  `,
+	}.TryBytes().Body))
 }
 
 func TestRedirect(t *testing.T) {
@@ -295,7 +337,7 @@ func testFileOk(t testing.TB, file File, head Head) {
 
 func TestDir(t *testing.T) {
 	try(os.Chdir(`..`))
-	t.Cleanup(func() { os.Chdir(`goh`) })
+	t.Cleanup(func() { try(os.Chdir(`goh`)) })
 
 	t.Run(`without filter`, func(t *testing.T) {
 		dir := Dir{Path: `goh`}
