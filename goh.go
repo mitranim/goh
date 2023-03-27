@@ -167,13 +167,14 @@ func (self Reader) Head() Head {
 
 // Implement `http.Handler`.
 func (self Reader) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
-	self.Head().Write(rew)
+	head := self.Head()
+	head.Write(rew)
 
 	if self.Body != nil {
 		_, err := io.Copy(rew, self.Body)
 		if err != nil {
 			err = fmt.Errorf(`[goh] failed to copy response from reader: %w`, err)
-			self.Head().errFunc()(rew, req, err, true)
+			head.errFunc()(rew, req, err, true)
 		}
 	}
 }
@@ -199,12 +200,13 @@ func (self Bytes) Head() Head {
 
 // Implement `http.Handler`.
 func (self Bytes) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
-	self.Head().Write(rew)
+	head := self.Head()
+	head.Write(rew)
 
 	_, err := rew.Write(self.Body)
 	if err != nil {
 		err = fmt.Errorf(`[goh] failed to write response bytes: %w`, err)
-		self.Head().errFunc()(rew, req, err, true)
+		head.errFunc()(rew, req, err, true)
 	}
 }
 
@@ -239,12 +241,13 @@ func (self String) Head() Head {
 
 // Implement `http.Handler`.
 func (self String) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
-	self.Head().Write(rew)
+	head := self.Head()
+	head.Write(rew)
 
 	_, err := io.WriteString(rew, self.Body)
 	if err != nil {
 		err = fmt.Errorf(`[goh] failed to write response string: %w`, err)
-		self.Head().errFunc()(rew, req, err, true)
+		head.errFunc()(rew, req, err, true)
 	}
 }
 
@@ -281,7 +284,9 @@ func (self Json) Head() Head {
 // Implement `http.Handler`.
 func (self Json) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 	rew.Header().Set(HeadType, TypeJson)
-	self.Head().Write(rew)
+
+	head := self.Head()
+	head.Write(rew)
 
 	writer := spyingWriter{Writer: rew}
 	enc := json.NewEncoder(&writer)
@@ -290,7 +295,7 @@ func (self Json) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 	err := enc.Encode(self.Body)
 	if err != nil {
 		err = fmt.Errorf(`[goh] failed to write response as JSON: %w`, err)
-		self.Head().errFunc()(rew, req, err, writer.wrote)
+		head.errFunc()(rew, req, err, writer.wrote)
 	}
 }
 
@@ -351,7 +356,9 @@ func (self Xml) Head() Head {
 // Implement `http.Handler`.
 func (self Xml) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 	rew.Header().Set(HeadType, `application/xml`)
-	self.Head().Write(rew)
+
+	head := self.Head()
+	head.Write(rew)
 
 	writer := spyingWriter{Writer: rew}
 	enc := xml.NewEncoder(&writer)
@@ -360,7 +367,7 @@ func (self Xml) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 	err := enc.Encode(self.Body)
 	if err != nil {
 		err = fmt.Errorf(`[goh] failed to write response as XML: %w`, err)
-		self.Head().errFunc()(rew, req, err, writer.wrote)
+		head.errFunc()(rew, req, err, writer.wrote)
 	}
 }
 
@@ -477,8 +484,14 @@ it verifies that the file exists and delegates to `http.ServeFile`. If the file
 doesn't exist, this responds with 404 without calling `http.ServeFile`,
 avoiding its undesirable "smarts".
 
+Unlike `http.ServeFile` and `http.FileServer`, this does not automatically add
+headers such as `Content-Type`, `Last-Modified`, `Etag`, and so on. This tool
+is intended mostly for development or as a lower-level building block. For
+serving files in production, you're expected to use a dedicated file server,
+or a higher-level tool.
+
 Unlike `http.ServeFile` and `http.FileServer`, responding with 404 is optional.
-`goh.File.MaybeHan` returns a nil handler if the file is not found. You can use
+`goh.File.HanOpt` returns a nil handler if the file is not found. You can use
 this to "try" serving a file, and fall back on something else.
 */
 type File struct {
@@ -495,22 +508,49 @@ func (self File) Head() Head {
 
 // Implement `http.Handler`.
 func (self File) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
-	self.Head().Write(rew)
-
-	if fileExists(self.Path) {
+	if self.Exists() {
+		self.Head().Write(rew)
 		http.ServeFile(rew, req, self.Path)
 	} else {
 		NotFound{}.ServeHTTP(rew, req)
 	}
 }
 
+/*
+Implement `HttpHandlerOpt`. If `.Exists()`, uses `.ServeHTTP` to serve the file
+and returns true. Otherwise returns false.
+*/
+func (self File) ServedHTTP(rew http.ResponseWriter, req *http.Request) bool {
+	if self.Exists() {
+		self.ServeHTTP(rew, req)
+		return true
+	}
+	return false
+}
+
+// True if a file exists at `.Path`.
+func (self File) Exists() bool { return fileExists(self.Path) }
+
+/*
+If `.Exists()`, returns itself as-is. Otherwise returns zero.
+Example usage: `File{...}.Existing().Path`.
+*/
+func (self File) Existing() (_ File) {
+	if self.Exists() {
+		return self
+	}
+	return
+}
+
 // Conforms to `goh.Han`. Always returns non-nil.
 func (self File) Han(*http.Request) http.Handler { return self }
 
-// Conforms to `goh.Han`. Returns self if file exists, otherwise returns nil.
-// Can be used to "try" serving a file.
-func (self File) MaybeHan(*http.Request) http.Handler {
-	if fileExists(self.Path) {
+/*
+Conforms to `goh.Han`. Returns self if file exists, otherwise returns nil.
+Can be used to "try" serving a file.
+*/
+func (self File) HanOpt(*http.Request) http.Handler {
+	if self.Exists() {
 		return self
 	}
 	return nil
@@ -520,11 +560,13 @@ func (self File) MaybeHan(*http.Request) http.Handler {
 HTTP handler that serves files out of a given directory. Similar to
 `http.FileServer`, but without its undesirable "smarts". This will serve only
 individual files, without directory listings or redirects. In addition, the
-method `goh.Dir.MaybeHan` supports "try file" functionality, allowing you to
+method `goh.Dir.HanOpt` supports "try file" functionality, allowing you to
 fall back on serving something else when a requested file is not found.
 
 The status, header, and err func are copied to each `goh.File` used for each
-response.
+response. Because this uses `goh.File` for each request, it doesn't support
+automatically adding headers such as `Content-Type`. See the comment on
+`goh.File`.
 */
 type Dir struct {
 	Status  int
@@ -541,41 +583,53 @@ func (self Dir) Head() Head {
 
 // Implement `http.Handler`.
 func (self Dir) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
-	self.Han(req).ServeHTTP(rew, req)
+	self.Resolve(req).ServeHTTP(rew, req)
+}
+
+/*
+Implement `HttpHandlerOpt`. If possible, serves the requested file and returns
+true. Otherwise returns false.
+*/
+func (self Dir) ServedHTTP(rew http.ResponseWriter, req *http.Request) bool {
+	return self.Resolve(req).ServedHTTP(rew, req)
 }
 
 // Conforms to `goh.Han`. Always returns non-nil.
 func (self Dir) Han(req *http.Request) http.Handler {
-	res := self.MaybeHan(req)
+	res := self.HanOpt(req)
 	if res != nil {
 		return res
 	}
 	return NotFound{}
 }
 
-// Conforms to `goh.Han`. Returns nil if requested file is not found.
-func (self Dir) MaybeHan(req *http.Request) http.Handler {
+// Conforms to `goh.Han`. Returns nil if the requested file is not found.
+func (self Dir) HanOpt(req *http.Request) http.Handler {
+	return self.Resolve(req).HanOpt(req)
+}
+
+func (self Dir) Resolve(req *http.Request) File {
 	reqPath := strings.TrimPrefix(req.URL.Path, `/`)
 	if strings.Contains(reqPath, `..`) || strings.HasSuffix(reqPath, `/`) {
-		return nil
+		return self.File(``)
 	}
 
 	filePath := filepath.Join(self.Path, reqPath)
-	if !self.allow(filePath) {
-		return nil
+	if !self.Allow(filePath) {
+		return self.File(``)
 	}
 
-	return self.file(filePath).MaybeHan(req)
+	return self.File(filePath)
 }
 
-func (self Dir) allow(path string) bool {
+func (self Dir) Allow(path string) bool {
 	if self.Filter != nil {
 		return self.Filter.Allow(filepath.ToSlash(path))
 	}
 	return true
 }
 
-func (self Dir) file(path string) File {
+func (self Dir) File(path string) File {
 	return File{
 		Status:  self.Status,
 		Header:  self.Header,
@@ -597,6 +651,16 @@ Unix and Windows. The path starts with `goh.Dir.Path`. For example:
 */
 type Filter interface {
 	Allow(string) bool
+}
+
+/*
+Variant of `http.Handler` that may or may not serve the request. If capable
+of serving the request, must serve it and return true. Otherwise, must return
+false without any side effects in the given response writer and request.
+This interface is implemented by some types in this module.
+*/
+type HttpHandlerOpt interface {
+	ServedHTTP(http.ResponseWriter, *http.Request) bool
 }
 
 /*
@@ -717,6 +781,9 @@ func bytesFrom(head Head, contentType string, body []byte) Bytes {
 }
 
 func fileExists(path string) bool {
+	if path == `` {
+		return false
+	}
 	stat, _ := os.Stat(path)
 	return stat != nil && !stat.IsDir()
 }

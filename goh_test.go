@@ -32,9 +32,9 @@ var (
 	_ = Han(Xml{}.Han)
 	_ = Han(Redirect{}.Han)
 	_ = Han(File{}.Han)
-	_ = Han(File{}.MaybeHan)
+	_ = Han(File{}.HanOpt)
 	_ = Han(Dir{}.Han)
-	_ = Han(Dir{}.MaybeHan)
+	_ = Han(Dir{}.HanOpt)
 	_ = Han(NotFound{}.Han)
 )
 
@@ -309,20 +309,25 @@ func TestFile(t *testing.T) {
 	t.Run(`use head`, func(t *testing.T) {
 		testFileOk(t, File{Status: 202, Path: `readme.md`}, Head{Status: 202, Header: http.Header{}})
 	})
+
+	t.Run(`write headers only on success`, func(t *testing.T) {
+		testFile404(t, File{Path: `readme.md/`, Header: headSrc})
+	})
 }
 
 func testFile404(t testing.TB, file File) {
-	eq(t, nil, file.MaybeHan(nil))
+	eq(t, nil, file.HanOpt(nil))
 	eq(t, file, file.Han(nil))
 
 	rew := ht.NewRecorder()
 	file.ServeHTTP(rew, nil)
 
 	eq(t, http.StatusNotFound, rew.Code)
+	eq(t, http.Header{}, rew.Header())
 }
 
 func testFileOk(t testing.TB, file File, head Head) {
-	eq(t, file, file.MaybeHan(nil))
+	eq(t, file, file.HanOpt(nil))
 	eq(t, file, file.Han(nil))
 
 	rew := ht.NewRecorder()
@@ -391,7 +396,7 @@ func TestDir(t *testing.T) {
 }
 
 func testDir404(t testing.TB, dir Dir, req *http.Request) {
-	eq(t, nil, dir.MaybeHan(req))
+	eq(t, nil, dir.HanOpt(req))
 	eq(t, NotFound{}, dir.Han(req))
 
 	rew := ht.NewRecorder()
@@ -401,7 +406,7 @@ func testDir404(t testing.TB, dir Dir, req *http.Request) {
 }
 
 func testDirOk(t testing.TB, dir Dir, req *http.Request, expPath string) {
-	eq(t, File{Path: expPath}, dir.MaybeHan(req))
+	eq(t, File{Path: expPath}, dir.HanOpt(req))
 	eq(t, File{Path: expPath}, dir.Han(req))
 
 	testFileOk(t, File{Path: expPath}, Head{Status: http.StatusOK})

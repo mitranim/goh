@@ -80,6 +80,27 @@ func writeErrAsJson(
 
 ## Changelog
 
+### `v0.1.11`
+
+Breaking:
+
+* Renamed `.MaybeHan` to `.HanOpt` in various types.
+
+Added:
+
+* `File.ServedHTTP`.
+* `File.Exists`.
+* `File.Existing`.
+* `Dir.ServedHTTP`.
+* `Dir.Resolve`.
+* `Dir.Allow`.
+* `Dir.File`.
+* `HttpHandlerOpt` (implemented by `File` and `Dir`).
+
+Fixed:
+
+* `File` no longer writes its `.Header` when the target file is not found.
+
 ### `v0.1.10`
 
 `Json` and `Xml` now support pretty-printing via field `.Indent`.
