@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -49,7 +50,14 @@ type XmlVal struct {
 
 var (
 	headSrc = http.Header{`One`: {`two`}, `three`: {`four`}}
+
 	headExp = http.Header{`One`: {`two`}, `three`: {`four`}}
+
+	headExpLen = http.Header{
+		`One`:            {`two`},
+		`three`:          {`four`},
+		`Content-Length`: {strconv.Itoa(len(`hello world`))},
+	}
 )
 
 type Dict = map[string]interface{}
@@ -82,24 +90,6 @@ func TestTryJsonBytes(t *testing.T) {
 	)
 }
 
-func TestHead_empty(t *testing.T) {
-	rew := ht.NewRecorder()
-	eq(t, 200, rew.Code)
-
-	Head{}.Write(rew)
-
-	eq(t, 200, rew.Code)
-	eq(t, 0, len(rew.Result().Header))
-}
-
-func TestHead_full(t *testing.T) {
-	rew := ht.NewRecorder()
-	Head{Status: 201, Header: headSrc}.Write(rew)
-
-	eq(t, 201, rew.Code)
-	eq(t, headExp, rew.Result().Header)
-}
-
 func TestReader(t *testing.T) {
 	rew := ht.NewRecorder()
 
@@ -118,7 +108,7 @@ func TestBytes(t *testing.T) {
 	Bytes{Status: 201, Header: headSrc, Body: []byte(src)}.ServeHTTP(rew, nil)
 
 	eq(t, 201, rew.Code)
-	eq(t, headExp, rew.Result().Header)
+	eq(t, headExpLen, rew.Result().Header)
 	eq(t, src, rew.Body.String())
 }
 
@@ -129,7 +119,7 @@ func TestString(t *testing.T) {
 	String{Status: 201, Header: headSrc, Body: src}.ServeHTTP(rew, nil)
 
 	eq(t, 201, rew.Code)
-	eq(t, headExp, rew.Result().Header)
+	eq(t, headExpLen, rew.Result().Header)
 	eq(t, src, rew.Body.String())
 }
 
@@ -137,7 +127,7 @@ func TestJson(t *testing.T) {
 	rew := ht.NewRecorder()
 
 	headExp := headExp.Clone()
-	headExp.Set(`content-type`, TypeJson)
+	headExp.Set(HeadType, TypeJson)
 
 	Json{Status: 201, Header: headSrc, Body: JsonVal{`hello world`}}.ServeHTTP(rew, nil)
 
@@ -154,7 +144,7 @@ func TestJson_TryBytes_nil_head(t *testing.T) {
 	}.TryBytes()
 
 	headExp := http.Header{}
-	headExp.Set(`content-type`, TypeJson)
+	headExp.Set(HeadType, TypeJson)
 
 	eq(t, 201, res.Status)
 	eq(t, headExp, res.Header)
@@ -171,7 +161,7 @@ func TestJson_TryBytes_non_nil_head(t *testing.T) {
 	}.TryBytes()
 
 	headExp := headSrc.Clone()
-	headExp.Set(`content-type`, TypeJson)
+	headExp.Set(HeadType, TypeJson)
 
 	eq(t, 201, res.Status)
 	eq(t, headExp, res.Header)
@@ -204,7 +194,7 @@ func TestXml(t *testing.T) {
 	rew := ht.NewRecorder()
 
 	headExp := headExp.Clone()
-	headExp.Set(`content-type`, `application/xml`)
+	headExp.Set(HeadType, TypeXml)
 
 	Xml{Status: 201, Header: headSrc, Body: XmlVal{xml.Name{Local: `tag`}, `hello world`}}.ServeHTTP(rew, nil)
 
@@ -221,7 +211,7 @@ func TestXml_TryBytes_nil_head(t *testing.T) {
 	}.TryBytes()
 
 	headExp := http.Header{}
-	headExp.Set(`content-type`, `application/xml`)
+	headExp.Set(HeadType, TypeXml)
 
 	eq(t, 201, res.Status)
 	eq(t, headExp, res.Header)
@@ -238,7 +228,7 @@ func TestXml_TryBytes_non_nil_head(t *testing.T) {
 	}.TryBytes()
 
 	headExp := headSrc.Clone()
-	headExp.Set(`content-type`, `application/xml`)
+	headExp.Set(HeadType, TypeXml)
 
 	eq(t, 201, res.Status)
 	eq(t, headExp, res.Header)
@@ -303,11 +293,12 @@ func TestFile(t *testing.T) {
 	})
 
 	t.Run(`exists`, func(t *testing.T) {
-		testFileOk(t, File{Path: `readme.md`}, Head{Status: 200})
+		testFileOk(t, File{Path: `readme.md`}, http.StatusOK, nil)
 	})
 
 	t.Run(`use head`, func(t *testing.T) {
-		testFileOk(t, File{Status: 202, Path: `readme.md`}, Head{Status: 202, Header: http.Header{}})
+		status := http.StatusAccepted
+		testFileOk(t, File{Status: status, Path: `readme.md`}, status, nil)
 	})
 
 	t.Run(`write headers only on success`, func(t *testing.T) {
@@ -326,16 +317,16 @@ func testFile404(t testing.TB, file File) {
 	eq(t, http.Header{}, rew.Header())
 }
 
-func testFileOk(t testing.TB, file File, head Head) {
+func testFileOk(t testing.TB, file File, status int, head http.Header) {
 	eq(t, file, file.HanOpt(nil))
 	eq(t, file, file.Han(nil))
 
 	rew := ht.NewRecorder()
 	file.ServeHTTP(rew, pathReq(`b824014bb44242c5b20b1706a5e0a930`))
 
-	eq(t, head.Status, rew.Code)
-	if head.Header != nil {
-		eq(t, head.Header, rew.Result().Header)
+	eq(t, status, rew.Code)
+	if head != nil {
+		eq(t, head, rew.Result().Header)
 	}
 	eq(t, readFile(file.Path), rew.Body.Bytes())
 }
@@ -409,7 +400,7 @@ func testDirOk(t testing.TB, dir Dir, req *http.Request, expPath string) {
 	eq(t, File{Path: expPath}, dir.HanOpt(req))
 	eq(t, File{Path: expPath}, dir.Han(req))
 
-	testFileOk(t, File{Path: expPath}, Head{Status: http.StatusOK})
+	testFileOk(t, File{Path: expPath}, http.StatusOK, nil)
 
 	rew := ht.NewRecorder()
 	dir.ServeHTTP(rew, req)

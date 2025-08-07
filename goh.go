@@ -24,6 +24,7 @@ import (
 const (
 	HeadType  = `Content-Type`
 	TypeJson  = `application/json`
+	TypeXml   = `application/xml`
 	TypeForm  = `application/x-www-form-urlencoded`
 	TypeMulti = `multipart/form-data`
 )
@@ -99,55 +100,6 @@ dynamically-generated responses.
 func TryJsonBytes(val interface{}) Bytes { return JsonOk(val).TryBytes() }
 
 /*
-The head part of each `http.Handler` implementation in this package.
-Pseudo-embedded in the various handler types, obtained via `.Head()` methods.
-
-Goh uses pseudo-embedding instead of actual embedding because Go doesn't allow
-promoted fields to be used at the top level of embedding type. With embedding,
-literals of various handler types would have to use `Head: Head{}`.
-*/
-type Head struct {
-	Status  int
-	Header  http.Header
-	ErrFunc ErrFunc
-}
-
-/*
-Writes the header and HTTP status (if any) to the provided writer. Called
-internally by the various handler types. You shouldn't have to call this
-yourself, unless implementing a new type.
-
-This must be called exactly once, and only before writing the body.
-*/
-func (self Head) Write(rew http.ResponseWriter) {
-	self.writeHeaders(rew)
-
-	/**
-	The status `http.StatusOK` is implicit, and writing it should be equivalent to
-	writing no status at all. However, there are some unwanted "smarts" inside
-	the Go HTTP library, where writing status 200 suppresses the writing of
-	default HEADERS following it. One example is `http.ServeFile`.
-	*/
-	if self.Status != 0 && self.Status != http.StatusOK {
-		rew.WriteHeader(self.Status)
-	}
-}
-
-func (self Head) writeHeaders(rew http.ResponseWriter) {
-	target := rew.Header()
-	for key, vals := range self.Header {
-		target[key] = vals
-	}
-}
-
-func (self Head) errFunc() ErrFunc {
-	if self.ErrFunc != nil {
-		return self.ErrFunc
-	}
-	return HandleErr
-}
-
-/*
 HTTP handler that copies a response from a reader.
 
 Caution: if the reader is also `io.Closer`, it must be closed in your code.
@@ -160,21 +112,15 @@ type Reader struct {
 	Body    io.Reader
 }
 
-// Returns the pseudo-embedded `goh.Head` part.
-func (self Reader) Head() Head {
-	return Head{self.Status, self.Header, self.ErrFunc}
-}
-
 // Implement `http.Handler`.
 func (self Reader) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
-	head := self.Head()
-	head.Write(rew)
+	writeHead{status: self.Status, head: self.Header}.run(rew)
 
 	if self.Body != nil {
 		_, err := io.Copy(rew, self.Body)
 		if err != nil {
 			err = fmt.Errorf(`[goh] failed to copy response from reader: %w`, err)
-			head.errFunc()(rew, req, err, true)
+			errFunc(self.ErrFunc)(rew, req, err, true)
 		}
 	}
 }
@@ -193,20 +139,21 @@ type Bytes struct {
 	Body    []byte
 }
 
-// Returns the pseudo-embedded `goh.Head` part.
-func (self Bytes) Head() Head {
-	return Head{self.Status, self.Header, self.ErrFunc}
-}
-
 // Implement `http.Handler`.
 func (self Bytes) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
-	head := self.Head()
-	head.Write(rew)
+	body := self.Body
 
-	_, err := rew.Write(self.Body)
+	writeHead{
+		status:    self.Status,
+		head:      self.Header,
+		conLen:    len(body),
+		hasConLen: true,
+	}.run(rew)
+
+	_, err := rew.Write(body)
 	if err != nil {
 		err = fmt.Errorf(`[goh] failed to write response bytes: %w`, err)
-		head.errFunc()(rew, req, err, true)
+		errFunc(self.ErrFunc)(rew, req, err, true)
 	}
 }
 
@@ -234,20 +181,21 @@ type String struct {
 	Body    string
 }
 
-// Returns the pseudo-embedded `goh.Head` part.
-func (self String) Head() Head {
-	return Head{self.Status, self.Header, self.ErrFunc}
-}
-
 // Implement `http.Handler`.
 func (self String) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
-	head := self.Head()
-	head.Write(rew)
+	body := self.Body
 
-	_, err := io.WriteString(rew, self.Body)
+	writeHead{
+		status:    self.Status,
+		head:      self.Header,
+		conLen:    len(body),
+		hasConLen: true,
+	}.run(rew)
+
+	_, err := io.WriteString(rew, body)
 	if err != nil {
 		err = fmt.Errorf(`[goh] failed to write response string: %w`, err)
-		head.errFunc()(rew, req, err, true)
+		errFunc(self.ErrFunc)(rew, req, err, true)
 	}
 }
 
@@ -276,17 +224,9 @@ type Json struct {
 	Body    interface{}
 }
 
-// Returns the pseudo-embedded `goh.Head` part.
-func (self Json) Head() Head {
-	return Head{self.Status, self.Header, self.ErrFunc}
-}
-
 // Implement `http.Handler`.
 func (self Json) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
-	rew.Header().Set(HeadType, TypeJson)
-
-	head := self.Head()
-	head.Write(rew)
+	writeHead{status: self.Status, head: self.Header, conType: TypeJson}.run(rew)
 
 	writer := spyingWriter{Writer: rew}
 	enc := json.NewEncoder(&writer)
@@ -295,7 +235,7 @@ func (self Json) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 	err := enc.Encode(self.Body)
 	if err != nil {
 		err = fmt.Errorf(`[goh] failed to write response as JSON: %w`, err)
-		head.errFunc()(rew, req, err, writer.wrote)
+		errFunc(self.ErrFunc)(rew, req, err, writer.wrote)
 	}
 }
 
@@ -324,7 +264,7 @@ func (self Json) TryBytes() Bytes {
 	if err != nil {
 		panic(err)
 	}
-	return bytesFrom(self.Head(), TypeJson, body)
+	return bytesFrom(self.Status, self.Header, self.ErrFunc, TypeJson, body)
 }
 
 // Shortcut for `goh.JsonWith(http.StatusOK, body)`.
@@ -348,17 +288,13 @@ When you need to specify the encoding, wrap `.Body` in the utility type
 */
 type Xml Json
 
-// Returns the pseudo-embedded `goh.Head` part.
-func (self Xml) Head() Head {
-	return Head{self.Status, self.Header, self.ErrFunc}
-}
-
 // Implement `http.Handler`.
 func (self Xml) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
-	rew.Header().Set(HeadType, `application/xml`)
-
-	head := self.Head()
-	head.Write(rew)
+	writeHead{
+		status:  self.Status,
+		head:    self.Header,
+		conType: TypeXml,
+	}.run(rew)
 
 	writer := spyingWriter{Writer: rew}
 	enc := xml.NewEncoder(&writer)
@@ -367,7 +303,7 @@ func (self Xml) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 	err := enc.Encode(self.Body)
 	if err != nil {
 		err = fmt.Errorf(`[goh] failed to write response as XML: %w`, err)
-		head.errFunc()(rew, req, err, writer.wrote)
+		errFunc(self.ErrFunc)(rew, req, err, writer.wrote)
 	}
 }
 
@@ -396,7 +332,7 @@ func (self Xml) TryBytes() Bytes {
 	if err != nil {
 		panic(err)
 	}
-	return bytesFrom(self.Head(), `application/xml`, body)
+	return bytesFrom(self.Status, self.Header, self.ErrFunc, TypeXml, body)
 }
 
 // Shortcut for `goh.XmlWith(http.StatusOK, body)`.
@@ -417,14 +353,9 @@ type Redirect struct {
 	Link    string
 }
 
-// Returns the pseudo-embedded `goh.Head` part.
-func (self Redirect) Head() Head {
-	return Head{self.Status, self.Header, self.ErrFunc}
-}
-
 // Implement `http.Handler`.
 func (self Redirect) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
-	self.Head().writeHeaders(rew)
+	writeHead{head: self.Header}.run(rew)
 	http.Redirect(rew, req, self.Link, self.Status)
 }
 
@@ -501,15 +432,10 @@ type File struct {
 	Path    string
 }
 
-// Returns the pseudo-embedded `goh.Head` part.
-func (self File) Head() Head {
-	return Head{self.Status, self.Header, self.ErrFunc}
-}
-
 // Implement `http.Handler`.
 func (self File) ServeHTTP(rew http.ResponseWriter, req *http.Request) {
 	if self.Exists() {
-		self.Head().Write(rew)
+		writeHead{status: self.Status, head: self.Header}.run(rew)
 		http.ServeFile(rew, req, self.Path)
 	} else {
 		NotFound{}.ServeHTTP(rew, req)
@@ -574,11 +500,6 @@ type Dir struct {
 	ErrFunc ErrFunc
 	Path    string
 	Filter  Filter
-}
-
-// Returns the pseudo-embedded `goh.Head` part.
-func (self Dir) Head() Head {
-	return Head{self.Status, self.Header, self.ErrFunc}
 }
 
 // Implement `http.Handler`.
@@ -725,7 +646,76 @@ func Respond(rew http.ResponseWriter, req *http.Request, fun func() http.Handler
 	Handler(fun).ServeHTTP(rew, req)
 }
 
+func MutateHeader(tar, src http.Header) {
+	if tar == nil {
+		return
+	}
+	for key, vals := range src {
+		tar[key] = vals
+	}
+}
+
 var xmlVersionInst = []byte(`version="1.0"`)
+
+/*
+Used internally for writing headers.
+
+The `net/http` stack has auto-detection of `Content-Length`, but it only works
+for very short HTTP bodies. So when it's known before writing the body, we set
+it explicitly.
+*/
+type writeHead struct {
+	status    int
+	head      http.Header
+	conType   string
+	conLen    int
+	hasConLen bool
+}
+
+func (self writeHead) run(rew http.ResponseWriter) {
+	if rew == nil {
+		return
+	}
+
+	tar := rew.Header()
+	MutateHeader(tar, self.head)
+
+	if tar != nil {
+		if self.conType != `` {
+			headSetOpt(tar, HeadType, self.conType)
+		}
+		if self.hasConLen {
+			headSetOpt(tar, `Content-Length`, strconv.Itoa(self.conLen))
+		}
+	}
+
+	/**
+	The status `http.StatusOK` is implicit, and writing it should be equivalent to
+	writing no status at all. However, there are some unwanted "smarts" inside the
+	Go HTTP library, where writing status 200 suppresses the writing of default
+	headers following it. One example is `http.ServeFile`.
+	*/
+	if self.status != 0 && self.status != http.StatusOK {
+		rew.WriteHeader(self.status)
+	}
+}
+
+func headSetOpt(head http.Header, key, val string) {
+	if head == nil {
+		return
+	}
+	if head.Get(key) != `` {
+		return
+	}
+	head.Set(key, val)
+}
+
+func errFunc(fun ErrFunc) ErrFunc {
+	if fun != nil {
+		return fun
+	}
+	return HandleErr
+}
 
 type spyingWriter struct {
 	io.Writer
@@ -762,20 +752,26 @@ func recHandler(ptr *http.Handler) {
 	*ptr = StringWith(http.StatusInternalServerError, fmt.Sprint(val))
 }
 
-func bytesFrom(head Head, contentType string, body []byte) Bytes {
-	if contentType != `` {
-		if head.Header == nil {
-			head.Header = http.Header{HeadType: {contentType}}
+func bytesFrom(
+	status int,
+	head http.Header,
+	errFun ErrFunc,
+	conType string,
+	body []byte,
+) Bytes {
+	if conType != `` {
+		if head == nil {
+			head = http.Header{HeadType: {conType}}
 		} else {
-			head.Header = head.Header.Clone()
-			head.Header.Set(HeadType, contentType)
+			head = head.Clone()
+			head.Set(HeadType, conType)
 		}
 	}
 
 	return Bytes{
-		Status:  head.Status,
-		Header:  head.Header,
-		ErrFunc: head.ErrFunc,
+		Status:  status,
+		Header:  head,
+		ErrFunc: errFun,
 		Body:    body,
 	}
 }
